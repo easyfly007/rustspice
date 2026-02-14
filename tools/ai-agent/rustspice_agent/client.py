@@ -1,4 +1,4 @@
-"""HTTP client for MySpice sim-api server."""
+"""HTTP client for RustSpice sim-api server."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import httpx
 
-from myspice_agent.config import Config
+from rustspice_agent.config import Config
 
 
 class AnalysisType(str, Enum):
@@ -129,7 +129,7 @@ class SpiceClientError(Exception):
 
 
 class SpiceClient:
-    """HTTP client for communicating with MySpice sim-api server.
+    """HTTP client for communicating with RustSpice sim-api server.
 
     Example usage:
         client = SpiceClient()

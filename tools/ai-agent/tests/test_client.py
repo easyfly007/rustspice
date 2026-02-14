@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from myspice_agent.client import (
+from rustspice_agent.client import (
     SpiceClient,
     SpiceClientError,
     RunResult,
@@ -69,7 +69,7 @@ class TestSpiceClientMocked:
     @pytest.fixture
     def mock_client(self):
         """Create a client with mocked HTTP."""
-        with patch("myspice_agent.client.httpx.Client") as mock_httpx:
+        with patch("rustspice_agent.client.httpx.Client") as mock_httpx:
             client = SpiceClient(base_url="http://localhost:3000")
             yield client, mock_httpx
 

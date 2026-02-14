@@ -4,8 +4,8 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QTextDocument
 
-from myspice_gui.editor import NetlistEditor, SpiceHighlighter, SpiceCompleter
-from myspice_gui.editor.completer import (
+from rustspice_gui.editor import NetlistEditor, SpiceHighlighter, SpiceCompleter
+from rustspice_gui.editor.completer import (
     DEVICE_TYPES,
     CONTROL_COMMANDS,
     WAVEFORM_TYPES,

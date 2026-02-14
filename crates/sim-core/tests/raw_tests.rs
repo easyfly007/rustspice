@@ -27,13 +27,13 @@ fn raw_op_format() {
     let run = make_op_result();
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_raw_op_test.raw");
+    path.push("rustspice_raw_op_test.raw");
     raw::write_raw_op(&run, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();
 
     // Check header
-    assert!(content.contains("Title: MySpice"));
+    assert!(content.contains("Title: RustSpice"));
     assert!(content.contains("Plotname: Operating Point"));
     assert!(content.contains("Flags: real"));
     assert!(content.contains("No. Variables: 2")); // in, out (ground filtered)
@@ -63,7 +63,7 @@ fn raw_dc_sweep_format() {
     ];
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_raw_dc_test.raw");
+    path.push("rustspice_raw_dc_test.raw");
     raw::write_raw_sweep(source, &sweep_values, &node_names, &sweep_results, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();
@@ -98,7 +98,7 @@ fn raw_tran_format() {
     ];
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_raw_tran_test.raw");
+    path.push("rustspice_raw_tran_test.raw");
     raw::write_raw_tran(&times, &node_names, &solutions, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();
@@ -132,7 +132,7 @@ fn raw_ac_format() {
     ];
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_raw_ac_test.raw");
+    path.push("rustspice_raw_ac_test.raw");
     raw::write_raw_ac(&frequencies, &node_names, &ac_solutions, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();
@@ -159,7 +159,7 @@ fn raw_format_filters_ground_node() {
     let run = make_op_result();
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_raw_ground_test.raw");
+    path.push("rustspice_raw_ground_test.raw");
     raw::write_raw_op(&run, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();

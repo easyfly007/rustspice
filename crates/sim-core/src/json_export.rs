@@ -14,7 +14,7 @@ pub fn write_json_op(run: &RunResult, path: &Path, precision: usize) -> std::io:
     let mut out = String::new();
 
     out.push_str("{\n");
-    out.push_str(&format!("  \"format\": \"myspice-json\",\n"));
+    out.push_str(&format!("  \"format\": \"rustspice-json\",\n"));
     out.push_str(&format!("  \"version\": \"{}\",\n", VERSION));
     out.push_str(&format!("  \"analysis\": \"{:?}\",\n", run.analysis));
     out.push_str(&format!("  \"status\": \"{:?}\",\n", run.status));
@@ -64,7 +64,7 @@ pub fn write_json_sweep(
     let filtered_names: Vec<_> = node_names.iter().filter(|n| *n != "0").collect();
 
     out.push_str("{\n");
-    out.push_str(&format!("  \"format\": \"myspice-json\",\n"));
+    out.push_str(&format!("  \"format\": \"rustspice-json\",\n"));
     out.push_str(&format!("  \"version\": \"{}\",\n", VERSION));
     out.push_str("  \"analysis\": \"Dc\",\n");
     out.push_str(&format!("  \"sweep_source\": \"{}\",\n", source));
@@ -116,7 +116,7 @@ pub fn write_json_tran(
     let filtered_names: Vec<_> = node_names.iter().filter(|n| *n != "0").collect();
 
     out.push_str("{\n");
-    out.push_str(&format!("  \"format\": \"myspice-json\",\n"));
+    out.push_str(&format!("  \"format\": \"rustspice-json\",\n"));
     out.push_str(&format!("  \"version\": \"{}\",\n", VERSION));
     out.push_str("  \"analysis\": \"Tran\",\n");
     out.push_str(&format!("  \"points\": {},\n", times.len()));
@@ -168,7 +168,7 @@ pub fn write_json_ac(
     let filtered_names: Vec<_> = node_names.iter().filter(|n| *n != "0").collect();
 
     out.push_str("{\n");
-    out.push_str(&format!("  \"format\": \"myspice-json\",\n"));
+    out.push_str(&format!("  \"format\": \"rustspice-json\",\n"));
     out.push_str(&format!("  \"version\": \"{}\",\n", VERSION));
     out.push_str("  \"analysis\": \"Ac\",\n");
     out.push_str(&format!("  \"points\": {},\n", frequencies.len()));

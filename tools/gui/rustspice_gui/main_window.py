@@ -1,5 +1,5 @@
 """
-Main application window for MySpice GUI.
+Main application window for RustSpice GUI.
 
 Provides the main window with dockable panels for:
 - Netlist editor
@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QAction, QKeySequence, QFont, QIcon
 from PySide6.QtCore import Qt, QTimer, Slot
 
-from .client import MySpiceClient, RunResult, AnalysisType, AcSweepType, ClientError
+from .client import RustSpiceClient, RunResult, AnalysisType, AcSweepType, ClientError
 from .console import ConsoleWidget
 from .editor import NetlistEditor
 from .viewer import WaveformViewer, BodePlot, FftViewer, SignalListWidget, CursorManager, ResultsTable
@@ -290,7 +290,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
 
         self._server_url = server_url
-        self._client = MySpiceClient(server_url)
+        self._client = RustSpiceClient(server_url)
         self._worker: Optional[SimulationWorker] = None
         self._connection_checker: Optional[ConnectionChecker] = None
         self._current_file: Optional[Path] = None
@@ -311,7 +311,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Set up the main UI layout."""
-        self.setWindowTitle("MySpice")
+        self.setWindowTitle("RustSpice")
         self.setMinimumSize(1024, 768)
         self.resize(1400, 900)
 
@@ -766,9 +766,9 @@ C1 out 0 100n
 
     def _update_title(self):
         """Update window title."""
-        title = "MySpice"
+        title = "RustSpice"
         if self._current_file:
-            title = f"{self._current_file.name} - MySpice"
+            title = f"{self._current_file.name} - RustSpice"
         if self._modified:
             title = "* " + title
         self.setWindowTitle(title)
@@ -1140,10 +1140,10 @@ C1 out 0 100n
     def _on_about(self):
         """Show about dialog."""
         QMessageBox.about(
-            self, "About MySpice",
-            """<h2>MySpice GUI</h2>
+            self, "About RustSpice",
+            """<h2>RustSpice GUI</h2>
             <p>Version 0.1.0</p>
-            <p>A graphical interface for MySpice circuit simulator.</p>
+            <p>A graphical interface for RustSpice circuit simulator.</p>
             <p>Built with PySide6 (Qt for Python)</p>
             """
         )

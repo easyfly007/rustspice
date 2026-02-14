@@ -2,7 +2,7 @@
 
 ## Overview
 
-This module implements the **BSIM3v3 (Level 49)** MOSFET model for DC analysis in MySpice. BSIM3 (Berkeley Short-channel IGFET Model) is the industry-standard compact model for sub-micron CMOS technologies (90nm and above).
+This module implements the **BSIM3v3 (Level 49)** MOSFET model for DC analysis in RustSpice. BSIM3 (Berkeley Short-channel IGFET Model) is the industry-standard compact model for sub-micron CMOS technologies (90nm and above).
 
 ### Why BSIM3?
 

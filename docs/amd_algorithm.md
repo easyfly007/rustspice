@@ -1,6 +1,6 @@
 # Approximate Minimum Degree (AMD) Algorithm
 
-This document describes the AMD algorithm implemented in MySpice for computing fill-reducing orderings of sparse matrices.
+This document describes the AMD algorithm implemented in RustSpice for computing fill-reducing orderings of sparse matrices.
 
 ## Overview
 

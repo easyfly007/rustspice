@@ -120,7 +120,7 @@ R2 out 0 1k
 
     // Test PSF output
     let mut path = std::env::temp_dir();
-    path.push("myspice_tran_test.psf");
+    path.push("rustspice_tran_test.psf");
 
     sim_core::psf::write_psf_tran(
         &run.tran_times,

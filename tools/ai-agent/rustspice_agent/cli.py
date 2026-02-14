@@ -1,4 +1,4 @@
-"""Command-line interface for MySpice AI Agent."""
+"""Command-line interface for RustSpice AI Agent."""
 
 import sys
 from pathlib import Path
@@ -10,20 +10,20 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt
 
-from myspice_agent import __version__
-from myspice_agent.client import SpiceClient, SpiceClientError
-from myspice_agent.config import Config
-from myspice_agent.formatters import format_result
+from rustspice_agent import __version__
+from rustspice_agent.client import SpiceClient, SpiceClientError
+from rustspice_agent.config import Config
+from rustspice_agent.formatters import format_result
 
 console = Console()
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(version=__version__, prog_name="myspice-agent")
-@click.option("--api-url", envvar="MYSPICE_API_URL", help="API server URL")
+@click.version_option(version=__version__, prog_name="rustspice-agent")
+@click.option("--api-url", envvar="RUSTSPICE_API_URL", help="API server URL")
 @click.pass_context
 def main(ctx: click.Context, api_url: Optional[str]) -> None:
-    """MySpice AI Agent - AI-powered circuit simulation interface.
+    """RustSpice AI Agent - AI-powered circuit simulation interface.
 
     Run without arguments to start interactive chat mode (requires AI features).
     Use subcommands for direct simulation access.
@@ -240,17 +240,17 @@ def run_simulation(
 def interactive_mode(config: Config) -> None:
     """Start interactive chat mode with AI agent."""
     try:
-        from myspice_agent.agent import SpiceAgent, ANTHROPIC_AVAILABLE
+        from rustspice_agent.agent import SpiceAgent, ANTHROPIC_AVAILABLE
 
         if not ANTHROPIC_AVAILABLE:
             console.print(
                 "[yellow]AI features require the anthropic package.[/yellow]\n"
-                "Install with: pip install myspice-agent[ai]\n\n"
+                "Install with: pip install rustspice-agent[ai]\n\n"
                 "Use subcommands for direct simulation access:\n"
-                "  myspice-agent op <netlist>      - Operating point\n"
-                "  myspice-agent dc <netlist> ...  - DC sweep\n"
-                "  myspice-agent tran <netlist> .. - Transient\n"
-                "  myspice-agent ac <netlist> ...  - AC analysis\n"
+                "  rustspice-agent op <netlist>      - Operating point\n"
+                "  rustspice-agent dc <netlist> ...  - DC sweep\n"
+                "  rustspice-agent tran <netlist> .. - Transient\n"
+                "  rustspice-agent ac <netlist> ...  - AC analysis\n"
             )
             sys.exit(1)
 
@@ -265,7 +265,7 @@ def interactive_mode(config: Config) -> None:
         client = SpiceClient(base_url=config.api.url, timeout=5.0)
         if not client.ping():
             console.print(
-                f"[red]Cannot connect to MySpice API at {config.api.url}[/red]\n"
+                f"[red]Cannot connect to RustSpice API at {config.api.url}[/red]\n"
                 "Start the server with: cargo run -p sim-api"
             )
             sys.exit(1)
@@ -274,7 +274,7 @@ def interactive_mode(config: Config) -> None:
 
         console.print(
             Panel(
-                "[bold]MySpice AI Agent[/bold]\n\n"
+                "[bold]RustSpice AI Agent[/bold]\n\n"
                 "I can help you with circuit simulation. Describe your circuit or\n"
                 "paste a SPICE netlist, and I'll run the appropriate analysis.\n\n"
                 "Commands:\n"

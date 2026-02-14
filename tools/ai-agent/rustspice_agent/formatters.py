@@ -1,8 +1,8 @@
-"""Result formatting utilities for MySpice AI Agent."""
+"""Result formatting utilities for RustSpice AI Agent."""
 
 from typing import Any
 
-from myspice_agent.client import RunResult
+from rustspice_agent.client import RunResult
 
 
 def format_op_result(result: RunResult, precision: int = 6) -> str:
@@ -115,7 +115,7 @@ def format_ac_result(result: RunResult, precision: int = 4) -> str:
 
 def format_result(result: RunResult, precision: int = 6) -> str:
     """Format simulation result based on analysis type."""
-    from myspice_agent.client import AnalysisType
+    from rustspice_agent.client import AnalysisType
 
     header = f"**Analysis:** {result.analysis.value}\n**Status:** {result.status.value}\n\n"
 

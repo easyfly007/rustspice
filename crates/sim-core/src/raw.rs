@@ -216,7 +216,7 @@ fn write_raw_header(
     num_vars: usize,
     num_points: usize,
 ) {
-    out.push_str(&format!("Title: MySpice v{} Simulation\n", VERSION));
+    out.push_str(&format!("Title: RustSpice v{} Simulation\n", VERSION));
     out.push_str(&format!("Date: {}\n", chrono_lite_now()));
     out.push_str(&format!("Plotname: {}\n", plotname));
     out.push_str(&format!("Flags: {}\n", flags));

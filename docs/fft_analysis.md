@@ -10,7 +10,7 @@ The Fast Fourier Transform (FFT) converts time-domain simulation data into frequ
 - **Oscillator characterization**: Measuring fundamental frequency and spur levels
 - **Power supply ripple**: Quantifying ripple frequency and amplitude
 
-After running a `.tran` simulation, MySpice can compute the FFT of any node voltage or branch current to produce a magnitude-vs-frequency plot.
+After running a `.tran` simulation, RustSpice can compute the FFT of any node voltage or branch current to produce a magnitude-vs-frequency plot.
 
 ---
 

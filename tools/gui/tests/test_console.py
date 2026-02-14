@@ -3,7 +3,7 @@
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from myspice_gui.console import ConsoleWidget, MessageLevel
+from rustspice_gui.console import ConsoleWidget, MessageLevel
 
 
 # Create QApplication for tests (required for Qt widgets)

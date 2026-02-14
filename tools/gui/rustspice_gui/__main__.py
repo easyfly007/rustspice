@@ -1,10 +1,10 @@
 """
-Entry point for MySpice GUI application.
+Entry point for RustSpice GUI application.
 
 Usage:
-    python -m myspice_gui
-    myspice-gui  # if installed via pip
-    myspice-gui --server http://localhost:3000
+    python -m rustspice_gui
+    rustspice-gui  # if installed via pip
+    rustspice-gui --server http://localhost:3000
 """
 
 import argparse
@@ -20,13 +20,13 @@ from .main_window import MainWindow
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="MySpice GUI - Circuit Simulator Interface",
+        description="RustSpice GUI - Circuit Simulator Interface",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    myspice-gui                           # Connect to default server
-    myspice-gui --server http://host:3000 # Connect to specific server
-    myspice-gui circuit.cir               # Open a netlist file
+    rustspice-gui                           # Connect to default server
+    rustspice-gui --server http://host:3000 # Connect to specific server
+    rustspice-gui circuit.cir               # Open a netlist file
         """,
     )
     parser.add_argument(
@@ -55,9 +55,9 @@ def main():
 
     # Create Qt application
     app = QApplication(sys.argv)
-    app.setApplicationName("MySpice")
+    app.setApplicationName("RustSpice")
     app.setApplicationVersion("0.1.0")
-    app.setOrganizationName("MySpice")
+    app.setOrganizationName("RustSpice")
 
     # Set default font
     font = QFont("Consolas", 10)

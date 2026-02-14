@@ -1,10 +1,10 @@
 # Linear Solver Performance Guide
 
-This document provides comprehensive information about the linear solvers available in MySpice, their performance characteristics, limitations, and best practices.
+This document provides comprehensive information about the linear solvers available in RustSpice, their performance characteristics, limitations, and best practices.
 
 ## Overview
 
-MySpice provides five linear solver backends for circuit simulation:
+RustSpice provides five linear solver backends for circuit simulation:
 
 | Solver | Feature Flag | Dependencies | Performance | Best For |
 |--------|--------------|--------------|-------------|----------|
@@ -578,7 +578,7 @@ for iter in 1..max_newton {
 
 ## Automatic Solver Selection
 
-MySpice includes intelligent automatic solver selection based on matrix properties.
+RustSpice includes intelligent automatic solver selection based on matrix properties.
 
 ### Selection Criteria
 

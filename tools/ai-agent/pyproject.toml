@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "myspice-agent"
+name = "rustspice-agent"
 version = "0.1.0"
-description = "AI-powered interface for MySpice circuit simulator"
+description = "AI-powered interface for RustSpice circuit simulator"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "MySpice Team"}
+    {name = "RustSpice Team"}
 ]
 keywords = ["spice", "circuit", "simulation", "ai", "agent"]
 classifiers = [
@@ -46,20 +46,20 @@ dev = [
     "mypy>=1.10.0",
 ]
 all = [
-    "myspice-agent[ai,dev]",
+    "rustspice-agent[ai,dev]",
 ]
 
 [project.scripts]
-myspice-agent = "myspice_agent.cli:main"
+rustspice-agent = "rustspice_agent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/user/myspice"
-Documentation = "https://github.com/user/myspice/docs"
-Repository = "https://github.com/user/myspice"
+Homepage = "https://github.com/user/rustspice"
+Documentation = "https://github.com/user/rustspice/docs"
+Repository = "https://github.com/user/rustspice"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["myspice_agent*"]
+include = ["rustspice_agent*"]
 
 [tool.black]
 line-length = 100

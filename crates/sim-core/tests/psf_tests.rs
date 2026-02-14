@@ -22,7 +22,7 @@ fn psf_text_writer_outputs_basic_content() {
     let run_id = store.add_run(run);
 
     let mut path = std::env::temp_dir();
-    path.push("myspice_psf_test.txt");
+    path.push("rustspice_psf_test.txt");
     store.write_psf_text(run_id, &path, 6).unwrap();
 
     let content = std::fs::read_to_string(&path).unwrap();

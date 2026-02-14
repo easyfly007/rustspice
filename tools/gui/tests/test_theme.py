@@ -5,7 +5,7 @@ Tests for the theme manager.
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from myspice_gui.theme import (
+from rustspice_gui.theme import (
     ThemeManager,
     ThemeMode,
     ThemeColors,

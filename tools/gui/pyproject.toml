@@ -1,12 +1,12 @@
 [project]
-name = "myspice-gui"
+name = "rustspice-gui"
 version = "0.1.0"
-description = "Graphical user interface for MySpice circuit simulator"
+description = "Graphical user interface for RustSpice circuit simulator"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "MySpice Team"}
+    {name = "RustSpice Team"}
 ]
 keywords = ["spice", "circuit", "simulator", "gui", "eda"]
 classifiers = [
@@ -37,11 +37,11 @@ dev = [
 ]
 
 [project.scripts]
-myspice-gui = "myspice_gui.__main__:main"
+rustspice-gui = "rustspice_gui.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/myspice/myspice"
-Documentation = "https://github.com/myspice/myspice/docs"
+Homepage = "https://github.com/rustspice/rustspice"
+Documentation = "https://github.com/rustspice/rustspice/docs"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -49,7 +49,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["myspice_gui*"]
+include = ["rustspice_gui*"]
 
 [tool.black]
 line-length = 100

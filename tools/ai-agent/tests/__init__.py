@@ -1,1 +1,1 @@
-"""Tests for MySpice AI Agent."""
+"""Tests for RustSpice AI Agent."""

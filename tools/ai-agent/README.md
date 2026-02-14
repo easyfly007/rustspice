@@ -1,6 +1,6 @@
-# MySpice AI Agent
+# RustSpice AI Agent
 
-AI-powered command-line interface for MySpice circuit simulator. The agent provides both direct simulation commands and an interactive AI chat mode powered by Claude.
+AI-powered command-line interface for RustSpice circuit simulator. The agent provides both direct simulation commands and an interactive AI chat mode powered by Claude.
 
 ## Features
 
@@ -33,7 +33,7 @@ pip install -e ".[all]"
 
 ## Prerequisites
 
-1. **MySpice API Server**: The AI agent communicates with the MySpice simulation engine via HTTP API. Start the server first:
+1. **RustSpice API Server**: The AI agent communicates with the RustSpice simulation engine via HTTP API. Start the server first:
 
    ```bash
    # From project root
@@ -54,22 +54,22 @@ Run simulations directly without AI:
 
 ```bash
 # Operating Point analysis
-myspice-agent op circuit.cir
+rustspice-agent op circuit.cir
 
 # DC Sweep
-myspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 0.5
+rustspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 0.5
 
 # Transient analysis
-myspice-agent tran circuit.cir --tstop 1e-3 --tstep 1e-6
+rustspice-agent tran circuit.cir --tstop 1e-3 --tstep 1e-6
 
 # AC analysis
-myspice-agent ac circuit.cir --fstart 1 --fstop 1e6 --points 10
+rustspice-agent ac circuit.cir --fstart 1 --fstop 1e6 --points 10
 
 # Check server status
-myspice-agent status
+rustspice-agent status
 
 # List simulation runs
-myspice-agent runs
+rustspice-agent runs
 ```
 
 ### Export Options
@@ -78,13 +78,13 @@ All simulation commands support export options:
 
 ```bash
 # Export to CSV
-myspice-agent op circuit.cir -o results.csv -f csv
+rustspice-agent op circuit.cir -o results.csv -f csv
 
 # Export to JSON
-myspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 1 -o results.json -f json
+rustspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 1 -o results.json -f json
 
 # Export to PSF
-myspice-agent tran circuit.cir --tstop 1e-3 -o results.psf -f psf
+rustspice-agent tran circuit.cir --tstop 1e-3 -o results.psf -f psf
 ```
 
 ### Interactive AI Mode
@@ -92,7 +92,7 @@ myspice-agent tran circuit.cir --tstop 1e-3 -o results.psf -f psf
 Start the interactive AI chat mode:
 
 ```bash
-myspice-agent
+rustspice-agent
 ```
 
 In interactive mode, you can:
@@ -113,15 +113,15 @@ Interactive commands:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MYSPICE_API_URL` | API server URL | `http://localhost:3000` |
-| `MYSPICE_TIMEOUT` | Request timeout (seconds) | `30.0` |
-| `MYSPICE_MODEL` | Claude model name | `claude-sonnet-4-20250514` |
-| `MYSPICE_PRECISION` | Output precision (digits) | `6` |
+| `RUSTSPICE_API_URL` | API server URL | `http://localhost:3000` |
+| `RUSTSPICE_TIMEOUT` | Request timeout (seconds) | `30.0` |
+| `RUSTSPICE_MODEL` | Claude model name | `claude-sonnet-4-20250514` |
+| `RUSTSPICE_PRECISION` | Output precision (digits) | `6` |
 | `ANTHROPIC_API_KEY` | Anthropic API key | (required for AI mode) |
 
 ### Configuration File
 
-Create `~/.myspice/config.toml` for persistent settings:
+Create `~/.rustspice/config.toml` for persistent settings:
 
 ```toml
 [api]
@@ -141,7 +141,7 @@ format = "table"
 ## Architecture
 
 ```
-myspice-agent
+rustspice-agent
     |
     +-- cli.py          # Click-based CLI entry point
     +-- client.py       # HTTP client for sim-api
@@ -180,7 +180,7 @@ pip install -e ".[dev]"
 pytest
 
 # Run with coverage
-pytest --cov=myspice_agent
+pytest --cov=rustspice_agent
 
 # Run only unit tests (skip integration tests requiring server)
 pytest -m "not integration"
@@ -190,13 +190,13 @@ pytest -m "not integration"
 
 ```bash
 # Format code
-black myspice_agent tests
+black rustspice_agent tests
 
 # Lint
-ruff check myspice_agent tests
+ruff check rustspice_agent tests
 
 # Type checking
-mypy myspice_agent
+mypy rustspice_agent
 ```
 
 ## License

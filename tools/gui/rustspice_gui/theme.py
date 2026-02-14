@@ -1,5 +1,5 @@
 """
-Theme manager for MySpice GUI.
+Theme manager for RustSpice GUI.
 
 Provides dark and light themes with consistent styling across all widgets.
 """
@@ -130,7 +130,7 @@ class ThemeManager:
         return cls._instance
 
     def __init__(self):
-        self._settings = QSettings("MySpice", "GUI")
+        self._settings = QSettings("RustSpice", "GUI")
 
     @property
     def current_theme(self) -> ThemeMode:

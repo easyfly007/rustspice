@@ -1,8 +1,8 @@
-"""Tests for the MySpice HTTP client."""
+"""Tests for the RustSpice HTTP client."""
 
 import pytest
-from myspice_gui.client import (
-    MySpiceClient,
+from rustspice_gui.client import (
+    RustSpiceClient,
     RunResult,
     WaveformData,
     AnalysisType,
@@ -192,21 +192,21 @@ class TestAcSweepType:
         assert AcSweepType.LIN.value == "lin"
 
 
-class TestMySpiceClient:
-    """Tests for MySpiceClient (without actual server)."""
+class TestRustSpiceClient:
+    """Tests for RustSpiceClient (without actual server)."""
 
     def test_initialization(self):
         """Test client initialization."""
-        client = MySpiceClient("http://localhost:3000")
+        client = RustSpiceClient("http://localhost:3000")
         assert client.base_url == "http://localhost:3000"
         assert client.timeout == 60.0
 
     def test_initialization_with_trailing_slash(self):
         """Test that trailing slash is removed."""
-        client = MySpiceClient("http://localhost:3000/")
+        client = RustSpiceClient("http://localhost:3000/")
         assert client.base_url == "http://localhost:3000"
 
     def test_initialization_custom_timeout(self):
         """Test custom timeout."""
-        client = MySpiceClient("http://localhost:3000", timeout=120.0)
+        client = RustSpiceClient("http://localhost:3000", timeout=120.0)
         assert client.timeout == 120.0

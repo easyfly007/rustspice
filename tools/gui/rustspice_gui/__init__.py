@@ -1,5 +1,5 @@
 """
-MySpice GUI - Graphical user interface for MySpice circuit simulator.
+RustSpice GUI - Graphical user interface for RustSpice circuit simulator.
 
 This package provides a PySide6-based GUI for:
 - Editing SPICE netlists with syntax highlighting
@@ -8,15 +8,15 @@ This package provides a PySide6-based GUI for:
 """
 
 __version__ = "0.1.0"
-__author__ = "MySpice Team"
+__author__ = "RustSpice Team"
 
-from .client import MySpiceClient
+from .client import RustSpiceClient
 from .main_window import MainWindow
 from .editor import NetlistEditor, SpiceHighlighter, SpiceCompleter
 from .console import ConsoleWidget
 
 __all__ = [
-    "MySpiceClient",
+    "RustSpiceClient",
     "MainWindow",
     "NetlistEditor",
     "SpiceHighlighter",

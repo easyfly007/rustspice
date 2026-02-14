@@ -1,12 +1,12 @@
-# MySpice 用户手册
+# RustSpice 用户手册
 
-本文档面向使用 MySpice 的用户，介绍基本使用流程、命令行模式以及如何读取仿真输出。当前版本以 DC 与 TRAN 的基本流程为目标，随着功能完善会持续更新。
+本文档面向使用 RustSpice 的用户，介绍基本使用流程、命令行模式以及如何读取仿真输出。当前版本以 DC 与 TRAN 的基本流程为目标，随着功能完善会持续更新。
 
 ## 1. 快速开始
 
 ### 1.1 准备 netlist
 
-MySpice 使用 SPICE 风格网表文件作为输入。示例:
+RustSpice 使用 SPICE 风格网表文件作为输入。示例:
 
 ```
 * Basic DC example
@@ -230,7 +230,7 @@ DC sweep 的结果包含:
 
 ## 4. 受控源与 POLY 语法
 
-MySpice 支持四种受控源（Controlled Sources），可以用于构建运算放大器模型、电流镜、依赖源等电路结构。
+RustSpice 支持四种受控源（Controlled Sources），可以用于构建运算放大器模型、电流镜、依赖源等电路结构。
 
 ### 4.1 基本受控源
 
@@ -386,7 +386,7 @@ E_sum out 0 POLY(2) a 0 b 0 0 2.0 3.0
 
 ## 5. 输出格式
 
-MySpice 支持多种输出格式，可通过 `-f` 或 `--format` 选项指定。
+RustSpice 支持多种输出格式，可通过 `-f` 或 `--format` 选项指定。
 
 ### 5.1 支持的格式
 
@@ -421,7 +421,7 @@ JSON 格式提供结构化数据输出，包含元信息和仿真数据。
 
 ```json
 {
-  "format": "myspice-json",
+  "format": "rustspice-json",
   "version": "0.1.0",
   "analysis": "Op",
   "variables": [
@@ -435,7 +435,7 @@ JSON 格式提供结构化数据输出，包含元信息和仿真数据。
 
 ```json
 {
-  "format": "myspice-json",
+  "format": "rustspice-json",
   "version": "0.1.0",
   "analysis": "Dc",
   "sweep_source": "V1",
@@ -456,7 +456,7 @@ JSON 格式提供结构化数据输出，包含元信息和仿真数据。
 
 ```json
 {
-  "format": "myspice-json",
+  "format": "rustspice-json",
   "version": "0.1.0",
   "analysis": "Tran",
   "points": 100,
@@ -476,7 +476,7 @@ JSON 格式提供结构化数据输出，包含元信息和仿真数据。
 
 ```json
 {
-  "format": "myspice-json",
+  "format": "rustspice-json",
   "version": "0.1.0",
   "analysis": "Ac",
   "points": 10,
@@ -589,7 +589,7 @@ frequency,out_dB,out_deg
 
 ## 8. KLU 求解器依赖说明
 
-MySpice 的线性求解器规划为 SuiteSparse 的 KLU。当前阶段仅完成规划与接口设计，正式启用时需要:
+RustSpice 的线性求解器规划为 SuiteSparse 的 KLU。当前阶段仅完成规划与接口设计，正式启用时需要:
 
 - 安装 SuiteSparse（包含 KLU）
 - 在 Windows 环境准备预编译库或本地编译产物

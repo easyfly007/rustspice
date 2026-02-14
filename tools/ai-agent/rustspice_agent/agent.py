@@ -1,18 +1,18 @@
-"""Core AI agent for MySpice circuit simulation."""
+"""Core AI agent for RustSpice circuit simulation."""
 
 import json
 from typing import Any, Optional
 
-from myspice_agent.client import SpiceClient, SpiceClientError, RunResult
-from myspice_agent.config import Config
-from myspice_agent.formatters import (
+from rustspice_agent.client import SpiceClient, SpiceClientError, RunResult
+from rustspice_agent.config import Config
+from rustspice_agent.formatters import (
     format_result,
     format_circuit_summary,
     format_runs_list,
     format_waveform_summary,
 )
-from myspice_agent.prompts import SYSTEM_PROMPT
-from myspice_agent.tools import TOOLS
+from rustspice_agent.prompts import SYSTEM_PROMPT
+from rustspice_agent.tools import TOOLS
 
 # Try to import anthropic
 try:
@@ -26,7 +26,7 @@ class SpiceAgent:
     """AI-powered circuit simulation assistant.
 
     This agent uses Claude to interpret user requests and execute
-    appropriate simulations via the MySpice API.
+    appropriate simulations via the RustSpice API.
 
     Example:
         agent = SpiceAgent()
@@ -61,7 +61,7 @@ class SpiceAgent:
             if not ANTHROPIC_AVAILABLE:
                 raise RuntimeError(
                     "Anthropic package not installed. "
-                    "Install with: pip install myspice-agent[ai]"
+                    "Install with: pip install rustspice-agent[ai]"
                 )
             if not self.config.ai.api_key:
                 raise RuntimeError(

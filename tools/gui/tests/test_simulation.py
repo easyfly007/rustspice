@@ -6,10 +6,10 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from PySide6.QtWidgets import QApplication
 
-from myspice_gui.simulation import SimulationPanel, SimulationWorker, SimulationTask
-from myspice_gui.simulation.worker import AnalysisType, ConnectionChecker
-from myspice_gui.simulation.panel import OpPanel, DcPanel, TranPanel, AcPanel
-from myspice_gui.client import AcSweepType
+from rustspice_gui.simulation import SimulationPanel, SimulationWorker, SimulationTask
+from rustspice_gui.simulation.worker import AnalysisType, ConnectionChecker
+from rustspice_gui.simulation.panel import OpPanel, DcPanel, TranPanel, AcPanel
+from rustspice_gui.client import AcSweepType
 
 
 # Ensure QApplication exists for widget tests

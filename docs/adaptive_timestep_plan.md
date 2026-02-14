@@ -1,6 +1,6 @@
 # Adaptive Time Step Optimization Plan
 
-本文档描述 MySpice 瞬态分析自适应时间步长优化的实现计划。
+本文档描述 RustSpice 瞬态分析自适应时间步长优化的实现计划。
 
 ## 当前状态
 

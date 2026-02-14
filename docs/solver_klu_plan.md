@@ -1,6 +1,6 @@
 # KLU 求解器规划
 
-本文档定义 MySpice 的线性求解器实现方案，采用 SuiteSparse 的 KLU。
+本文档定义 RustSpice 的线性求解器实现方案，采用 SuiteSparse 的 KLU。
 
 ## 1. 调用链流程
 

@@ -1,6 +1,6 @@
 # AI Agent Integration Plan
 
-This document outlines the design and implementation plan for integrating AI agents with MySpice circuit simulator.
+This document outlines the design and implementation plan for integrating AI agents with RustSpice circuit simulator.
 
 ## 1. Overview
 
@@ -65,7 +65,7 @@ tools/ai-agent/
 ├── requirements.txt        # Dependencies
 ├── README.md               # Usage documentation
 │
-├── myspice_agent/          # Main package
+├── rustspice_agent/          # Main package
 │   ├── __init__.py
 │   ├── cli.py              # CLI entry point
 │   ├── agent.py            # Core AI agent logic
@@ -206,7 +206,7 @@ class SpiceAgent:
 ### 2.5 System Prompt (`prompts.py`)
 
 ```python
-SYSTEM_PROMPT = """You are a helpful circuit simulation assistant for MySpice,
+SYSTEM_PROMPT = """You are a helpful circuit simulation assistant for RustSpice,
 a SPICE-compatible circuit simulator.
 
 You can help users:
@@ -320,7 +320,7 @@ GET /v1/runs/1/waveform?signal=V(out)
 3. **Basic CLI**
    - Argument parsing (click/typer)
    - Direct command mode (no AI)
-   - Example: `myspice-agent run-op netlist.cir`
+   - Example: `rustspice-agent run-op netlist.cir`
 
 **Deliverables**:
 - Working HTTP client
@@ -513,12 +513,12 @@ off at -20dB/decade (first-order filter characteristic).
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Optional
-MYSPICE_API_URL=http://localhost:3000  # Default
-MYSPICE_MODEL=claude-sonnet-4-20250514      # Default
-MYSPICE_TIMEOUT=30                     # Request timeout seconds
+RUSTSPICE_API_URL=http://localhost:3000  # Default
+RUSTSPICE_MODEL=claude-sonnet-4-20250514      # Default
+RUSTSPICE_TIMEOUT=30                     # Request timeout seconds
 ```
 
-### 6.2 Configuration File (~/.myspice/config.toml)
+### 6.2 Configuration File (~/.rustspice/config.toml)
 
 ```toml
 [api]

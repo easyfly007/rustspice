@@ -2,7 +2,7 @@
 HTTP client for communicating with sim-api server.
 
 This module provides an async HTTP client for running simulations
-and retrieving results from the MySpice sim-api server.
+and retrieving results from the RustSpice sim-api server.
 """
 
 from dataclasses import dataclass, field
@@ -145,12 +145,12 @@ class ClientError(Exception):
         self.details = details or []
 
 
-class MySpiceClient:
+class RustSpiceClient:
     """
     Async HTTP client for sim-api server.
 
     Usage:
-        client = MySpiceClient("http://127.0.0.1:3000")
+        client = RustSpiceClient("http://127.0.0.1:3000")
         result = await client.run_op(netlist_text)
         waveform = await client.get_waveform(result.run_id, "V(out)")
     """

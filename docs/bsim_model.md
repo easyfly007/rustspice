@@ -1,4 +1,4 @@
-# BSIM 模型说明（MySpice 版本）
+# BSIM 模型说明（RustSpice 版本）
 
 ## 1. BSIM 是什么
 
@@ -7,7 +7,7 @@ BSIM3/BSIM4 覆盖短沟道效应、迁移率退化、速度饱和、DIBL、寄�
 
 参考：https://bsim.berkeley.edu/
 
-> **更新（v1.0）**：MySpice 现已实现 **BSIM3v3 (LEVEL=49) 核心 DC 模型**，支持完整的阈值电压、迁移率、输出电导计算。
+> **更新（v1.0）**：RustSpice 现已实现 **BSIM3v3 (LEVEL=49) 核心 DC 模型**，支持完整的阈值电压、迁移率、输出电导计算。
 
 ---
 

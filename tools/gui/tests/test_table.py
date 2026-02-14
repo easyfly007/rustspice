@@ -5,7 +5,7 @@ Tests for the enhanced results table widget.
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from myspice_gui.viewer.table import ResultsTable, ResultType
+from rustspice_gui.viewer.table import ResultsTable, ResultType
 
 
 @pytest.fixture(scope="session")

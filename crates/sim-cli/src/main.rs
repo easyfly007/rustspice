@@ -11,7 +11,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_help() {
     println!(
-        r#"MySpice SPICE Circuit Simulator
+        r#"RustSpice SPICE Circuit Simulator
 
 USAGE:
     sim-cli <NETLIST> [OPTIONS]
@@ -50,7 +50,7 @@ EXAMPLES:
 }
 
 fn print_version() {
-    println!("myspice {}", VERSION);
+    println!("rustspice {}", VERSION);
 }
 
 /// Output format for simulation results.

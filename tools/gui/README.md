@@ -1,6 +1,6 @@
-# MySpice GUI
+# RustSpice GUI
 
-Graphical user interface for MySpice circuit simulator, built with PySide6 (Qt for Python).
+Graphical user interface for RustSpice circuit simulator, built with PySide6 (Qt for Python).
 
 ## Features
 
@@ -40,7 +40,7 @@ Graphical user interface for MySpice circuit simulator, built with PySide6 (Qt f
 ### Prerequisites
 
 - Python 3.10 or later
-- sim-api server running (from the main MySpice project)
+- sim-api server running (from the main RustSpice project)
 
 ### Install from source
 
@@ -70,13 +70,13 @@ cargo run -p sim-api -- --addr 127.0.0.1:3000
 
 ```bash
 # Default server (localhost:3000)
-myspice-gui
+rustspice-gui
 
 # Connect to specific server
-myspice-gui --server http://192.168.1.100:3000
+rustspice-gui --server http://192.168.1.100:3000
 
 # Open a netlist file
-myspice-gui my_circuit.cir
+rustspice-gui my_circuit.cir
 ```
 
 ## Keyboard Shortcuts
@@ -96,7 +96,7 @@ myspice-gui my_circuit.cir
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│  MySpice - rc_lowpass.cir                                              [─][□][×]
+│  RustSpice - rc_lowpass.cir                                              [─][□][×]
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │  File  Edit  Simulate  View  Help                                               │
 ├─────────────────────────────────────────────────────────────────────────────────┤
@@ -126,7 +126,7 @@ myspice-gui my_circuit.cir
 ## Architecture
 
 ```
-myspice_gui/
+rustspice_gui/
 ├── __init__.py       # Package exports
 ├── __main__.py       # Entry point
 ├── main_window.py    # Main window and panels
@@ -158,8 +158,8 @@ pytest
 ### Code formatting
 
 ```bash
-black myspice_gui/
-ruff check myspice_gui/
+black rustspice_gui/
+ruff check rustspice_gui/
 ```
 
 ## Roadmap

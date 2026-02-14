@@ -1,6 +1,6 @@
-"""System prompts and templates for MySpice AI Agent."""
+"""System prompts and templates for RustSpice AI Agent."""
 
-SYSTEM_PROMPT = """You are a helpful circuit simulation assistant for MySpice, a SPICE-compatible circuit simulator.
+SYSTEM_PROMPT = """You are a helpful circuit simulation assistant for RustSpice, a SPICE-compatible circuit simulator.
 
 You can help users:
 1. Create and modify SPICE netlists

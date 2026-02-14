@@ -1,6 +1,6 @@
-# MySpice 开发日志 (Changelog)
+# RustSpice 开发日志 (Changelog)
 
-本文档记录 MySpice 项目的开发进展和计划。
+本文档记录 RustSpice 项目的开发进展和计划。
 
 ---
 
@@ -8,7 +8,7 @@
 
 ### 已完成
 
-#### 语法高亮编辑器 (`tools/gui/myspice_gui/editor/`)
+#### 语法高亮编辑器 (`tools/gui/rustspice_gui/editor/`)
 
 实现完整的 SPICE 网表编辑器，支持语法高亮、行号显示和自动补全。
 
@@ -40,10 +40,10 @@
    - 状态栏显示行列号
 
 **新增文件：**
-- `tools/gui/myspice_gui/editor/__init__.py` - 模块导出
-- `tools/gui/myspice_gui/editor/editor.py` - 主编辑器组件 (~350 行)
-- `tools/gui/myspice_gui/editor/highlighter.py` - 语法高亮 (~180 行)
-- `tools/gui/myspice_gui/editor/completer.py` - 自动补全 (~220 行)
+- `tools/gui/rustspice_gui/editor/__init__.py` - 模块导出
+- `tools/gui/rustspice_gui/editor/editor.py` - 主编辑器组件 (~350 行)
+- `tools/gui/rustspice_gui/editor/highlighter.py` - 语法高亮 (~180 行)
+- `tools/gui/rustspice_gui/editor/completer.py` - 自动补全 (~220 行)
 - `tools/gui/tests/test_editor.py` - 编辑器测试 (~200 行)
 
 **语法高亮规则：**
@@ -71,7 +71,7 @@
 
 #### GUI 核心基础设施 (`tools/gui/`)
 
-实现 MySpice 图形用户界面的核心基础设施，使用 PySide6 (Qt for Python)。
+实现 RustSpice 图形用户界面的核心基础设施，使用 PySide6 (Qt for Python)。
 
 **功能特性：**
 
@@ -117,13 +117,13 @@ pip install -e .
 cargo run -p sim-api -- --addr 127.0.0.1:3000
 
 # 启动 GUI
-myspice-gui
+rustspice-gui
 
 # 指定服务器地址
-myspice-gui --server http://192.168.1.100:3000
+rustspice-gui --server http://192.168.1.100:3000
 
 # 打开网表文件
-myspice-gui circuit.cir
+rustspice-gui circuit.cir
 ```
 
 **键盘快捷键：**
@@ -139,7 +139,7 @@ myspice-gui circuit.cir
 **新增文件：**
 - `tools/gui/pyproject.toml` - 包配置
 - `tools/gui/README.md` - 使用文档
-- `tools/gui/myspice_gui/` - Python 包
+- `tools/gui/rustspice_gui/` - Python 包
   - `__init__.py` - 包导出
   - `__main__.py` - 入口点
   - `client.py` - HTTP 客户端 (~280 行)
@@ -191,7 +191,7 @@ myspice-gui circuit.cir
 
 4. **配置管理**
    - 环境变量支持
-   - TOML 配置文件 (`~/.myspice/config.toml`)
+   - TOML 配置文件 (`~/.rustspice/config.toml`)
    - 分层优先级：环境变量 > 配置文件 > 默认值
 
 **安装方式：**
@@ -208,13 +208,13 @@ pip install -e ".[all]"    # 开发安装
 cargo run -p sim-api -- --addr 127.0.0.1:3000
 
 # CLI 直接命令
-myspice-agent op circuit.cir
-myspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 0.5
-myspice-agent tran circuit.cir --tstop 1e-3
+rustspice-agent op circuit.cir
+rustspice-agent dc circuit.cir -s V1 --start 0 --stop 5 --step 0.5
+rustspice-agent tran circuit.cir --tstop 1e-3
 
 # AI 交互模式
 export ANTHROPIC_API_KEY=your-key
-myspice-agent
+rustspice-agent
 ```
 
 **AI 工具列表：**
@@ -233,7 +233,7 @@ myspice-agent
 
 **新增文件：**
 - `tools/ai-agent/pyproject.toml` - 包配置
-- `tools/ai-agent/myspice_agent/` - Python 包
+- `tools/ai-agent/rustspice_agent/` - Python 包
   - `__init__.py` - 包导出
   - `client.py` - HTTP 客户端 (~240 行)
   - `agent.py` - AI 代理 (~300 行)
@@ -405,7 +405,7 @@ sim-cli circuit.cir -o output.raw -f raw    # ngspice raw
 **JSON 格式示例 (DC sweep)：**
 ```json
 {
-  "format": "myspice-json",
+  "format": "rustspice-json",
   "version": "0.1.0",
   "analysis": "Dc",
   "sweep_source": "V1",
@@ -499,7 +499,7 @@ E_add out 0 POLY(2) a 0 b 0 0 2.0 3.0
 - `crates/sim-core/src/circuit.rs` - 添加 PolySpec 结构体
 - `crates/sim-core/src/netlist.rs` - 构建 POLY 规格
 - `crates/sim-core/src/stamp.rs` - 多项式评估和 stamp 函数
-- `docs/myspice_user_manual.md` - 更新文档
+- `docs/rustspice_user_manual.md` - 更新文档
 
 ---
 

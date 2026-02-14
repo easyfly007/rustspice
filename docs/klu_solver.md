@@ -1,6 +1,6 @@
 # KLU Sparse Solver Guide
 
-This document describes the KLU sparse linear solver integration in MySpice, including installation, configuration, API reference, and performance tuning.
+This document describes the KLU sparse linear solver integration in RustSpice, including installation, configuration, API reference, and performance tuning.
 
 ## Overview
 
@@ -26,7 +26,7 @@ KLU requires the SuiteSparse library suite. Installation varies by platform:
 sudo apt-get update
 sudo apt-get install libsuitesparse-dev
 
-# Build MySpice with KLU
+# Build RustSpice with KLU
 cargo build --features klu
 ```
 
@@ -100,7 +100,7 @@ cmake --install .
 # Set environment
 $env:SUITESPARSE_DIR = "C:\SuiteSparse"
 
-# Build MySpice
+# Build RustSpice
 cargo build --features klu
 ```
 

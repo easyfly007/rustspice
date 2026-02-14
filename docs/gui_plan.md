@@ -1,8 +1,8 @@
-# MySpice GUI Implementation Plan
+# RustSpice GUI Implementation Plan
 
 ## Overview
 
-This document outlines the plan for implementing a graphical user interface (GUI) for MySpice circuit simulator. The GUI will provide an intuitive interface for netlist editing, simulation control, and waveform visualization.
+This document outlines the plan for implementing a graphical user interface (GUI) for RustSpice circuit simulator. The GUI will provide an intuitive interface for netlist editing, simulation control, and waveform visualization.
 
 ## Technology Selection
 
@@ -30,7 +30,7 @@ This document outlines the plan for implementing a graphical user interface (GUI
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         MySpice GUI                              │
+│                         RustSpice GUI                              │
 │                        (PySide6 + Qt)                            │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
@@ -147,7 +147,7 @@ class NetlistEditor(QPlainTextEdit):
 **Implementation:**
 ```python
 class SimulationPanel(QWidget):
-    def __init__(self, client: MySpiceClient):
+    def __init__(self, client: RustSpiceClient):
         self.analysis_tabs = QTabWidget()
         self.analysis_tabs.addTab(OpPanel(), "OP")
         self.analysis_tabs.addTab(DcPanel(), "DC")
@@ -228,10 +228,10 @@ class ResultsTable(QTableWidget):
 
 ## API Client
 
-Reuse and extend the existing `tools/ai-agent/myspice_agent/client.py`:
+Reuse and extend the existing `tools/ai-agent/rustspice_agent/client.py`:
 
 ```python
-# myspice_gui/client.py
+# rustspice_gui/client.py
 
 from dataclasses import dataclass
 from typing import Optional, List
@@ -245,7 +245,7 @@ class WaveformData:
     x_values: List[float]
     y_values: List[float]
 
-class MySpiceClient:
+class RustSpiceClient:
     def __init__(self, base_url: str = "http://127.0.0.1:3000"):
         self.base_url = base_url
         self.client = httpx.AsyncClient(timeout=60.0)
@@ -293,7 +293,7 @@ class MySpiceClient:
 tools/gui/
 ├── pyproject.toml           # Package configuration
 ├── README.md                # User documentation
-├── myspice_gui/
+├── rustspice_gui/
 │   ├── __init__.py
 │   ├── __main__.py          # Entry point
 │   ├── main_window.py       # Main application window
@@ -393,7 +393,7 @@ HIGHLIGHT_RULES = [
 - [x] Error display
 
 **Implementation Notes (2026-02-03):**
-- Created `myspice_gui/simulation/` module with:
+- Created `rustspice_gui/simulation/` module with:
   - `panel.py`: SimulationPanel with OP/DC/TRAN/AC tabs, validation, progress bar
   - `worker.py`: SimulationWorker using QThread for non-blocking simulation
   - `__init__.py`: Module exports
@@ -425,7 +425,7 @@ HIGHLIGHT_RULES = [
 - [x] Export to PNG
 
 **Implementation Notes (2026-02-04):**
-- Created `myspice_gui/viewer/waveform.py`: WaveformViewer with:
+- Created `rustspice_gui/viewer/waveform.py`: WaveformViewer with:
   - Multi-signal plotting with automatic color assignment
   - pyqtgraph-based interactive plot
   - Auto-scale and reset view buttons
@@ -434,18 +434,18 @@ HIGHLIGHT_RULES = [
   - Context menu (right-click) with Reset Zoom, Auto Scale, Add Cursor, Toggle Grid, Export options
   - Double-click to add measurement cursor
   - CSV data export
-- Created `myspice_gui/viewer/signal_list.py`: SignalListWidget with:
+- Created `rustspice_gui/viewer/signal_list.py`: SignalListWidget with:
   - Visibility checkboxes for each signal
   - Color picker buttons
   - Show All / Hide All buttons
   - Remove signal buttons
-- Created `myspice_gui/viewer/bode.py`: BodePlot with:
+- Created `rustspice_gui/viewer/bode.py`: BodePlot with:
   - Magnitude (dB) and Phase (degrees) dual plots
   - Logarithmic frequency axis
   - Linked X-axes
   - Context menu with export options
   - CSV data export
-- Created `myspice_gui/viewer/cursors.py`: CursorManager with:
+- Created `rustspice_gui/viewer/cursors.py`: CursorManager with:
   - Draggable vertical cursors
   - Delta measurement display
   - Frequency (1/Δ) calculation
@@ -472,14 +472,14 @@ HIGHLIGHT_RULES = [
 - [x] Dark/light theme toggle
 
 **Implementation Notes (2026-02-03):**
-- Created `myspice_gui/viewer/table.py`: Enhanced ResultsTable with:
+- Created `rustspice_gui/viewer/table.py`: Enhanced ResultsTable with:
   - Sortable columns
   - Copy to clipboard (Ctrl+C)
   - Export to CSV
   - Search/filter functionality
   - Engineering notation formatting
   - Context menu
-- Created `myspice_gui/theme.py`: ThemeManager with:
+- Created `rustspice_gui/theme.py`: ThemeManager with:
   - Light and dark themes
   - Automatic stylesheet generation
   - QPalette generation
@@ -511,7 +511,7 @@ HIGHLIGHT_RULES = [
 ```toml
 # pyproject.toml
 [project]
-name = "myspice-gui"
+name = "rustspice-gui"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -528,7 +528,7 @@ dev = [
 ]
 
 [project.scripts]
-myspice-gui = "myspice_gui.__main__:main"
+rustspice-gui = "rustspice_gui.__main__:main"
 ```
 
 ---
@@ -544,10 +544,10 @@ pip install -e .
 cargo run -p sim-api -- --addr 127.0.0.1:3000
 
 # Launch GUI
-myspice-gui
+rustspice-gui
 
 # Or with specific server
-myspice-gui --server http://localhost:3000
+rustspice-gui --server http://localhost:3000
 ```
 
 ---
@@ -558,7 +558,7 @@ myspice-gui --server http://localhost:3000
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  MySpice - rc_lowpass.cir                                      [─][□][×]
+│  RustSpice - rc_lowpass.cir                                      [─][□][×]
 ├─────────────────────────────────────────────────────────────────────┤
 │  File  Edit  Simulate  View  Help                                   │
 ├─────────────────────────────────────────────────────────────────────┤

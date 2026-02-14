@@ -9,12 +9,12 @@ class TestWaveformViewer:
 
     def test_import(self):
         """Test that WaveformViewer can be imported."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
         assert WaveformViewer is not None
 
     def test_add_signal(self, qtbot):
         """Test adding a signal to the viewer."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -27,7 +27,7 @@ class TestWaveformViewer:
 
     def test_remove_signal(self, qtbot):
         """Test removing a signal from the viewer."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -40,7 +40,7 @@ class TestWaveformViewer:
 
     def test_signal_visibility(self, qtbot):
         """Test signal visibility toggle."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -54,7 +54,7 @@ class TestWaveformViewer:
 
     def test_signal_color(self, qtbot):
         """Test changing signal color."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -67,7 +67,7 @@ class TestWaveformViewer:
 
     def test_get_signal_data(self, qtbot):
         """Test retrieving signal data."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -84,7 +84,7 @@ class TestWaveformViewer:
 
     def test_clear(self, qtbot):
         """Test clearing all signals."""
-        from myspice_gui.viewer import WaveformViewer
+        from rustspice_gui.viewer import WaveformViewer
 
         viewer = WaveformViewer()
         qtbot.addWidget(viewer)
@@ -102,12 +102,12 @@ class TestBodePlot:
 
     def test_import(self):
         """Test that BodePlot can be imported."""
-        from myspice_gui.viewer import BodePlot
+        from rustspice_gui.viewer import BodePlot
         assert BodePlot is not None
 
     def test_add_ac_signal(self, qtbot):
         """Test adding an AC signal to Bode plot."""
-        from myspice_gui.viewer import BodePlot
+        from rustspice_gui.viewer import BodePlot
 
         bode = BodePlot()
         qtbot.addWidget(bode)
@@ -121,7 +121,7 @@ class TestBodePlot:
 
     def test_remove_ac_signal(self, qtbot):
         """Test removing a signal from Bode plot."""
-        from myspice_gui.viewer import BodePlot
+        from rustspice_gui.viewer import BodePlot
 
         bode = BodePlot()
         qtbot.addWidget(bode)
@@ -134,7 +134,7 @@ class TestBodePlot:
 
     def test_signal_visibility(self, qtbot):
         """Test AC signal visibility toggle."""
-        from myspice_gui.viewer import BodePlot
+        from rustspice_gui.viewer import BodePlot
 
         bode = BodePlot()
         qtbot.addWidget(bode)
@@ -147,7 +147,7 @@ class TestBodePlot:
 
     def test_clear(self, qtbot):
         """Test clearing all signals."""
-        from myspice_gui.viewer import BodePlot
+        from rustspice_gui.viewer import BodePlot
 
         bode = BodePlot()
         qtbot.addWidget(bode)
@@ -165,12 +165,12 @@ class TestSignalListWidget:
 
     def test_import(self):
         """Test that SignalListWidget can be imported."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
         assert SignalListWidget is not None
 
     def test_add_signal(self, qtbot):
         """Test adding a signal to the list."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
 
         widget = SignalListWidget()
         qtbot.addWidget(widget)
@@ -180,7 +180,7 @@ class TestSignalListWidget:
 
     def test_remove_signal(self, qtbot):
         """Test removing a signal from the list."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
 
         widget = SignalListWidget()
         qtbot.addWidget(widget)
@@ -193,7 +193,7 @@ class TestSignalListWidget:
 
     def test_signal_visibility(self, qtbot):
         """Test signal visibility."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
 
         widget = SignalListWidget()
         qtbot.addWidget(widget)
@@ -206,7 +206,7 @@ class TestSignalListWidget:
 
     def test_signal_color(self, qtbot):
         """Test signal color."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
 
         widget = SignalListWidget()
         qtbot.addWidget(widget)
@@ -219,7 +219,7 @@ class TestSignalListWidget:
 
     def test_clear(self, qtbot):
         """Test clearing all signals."""
-        from myspice_gui.viewer import SignalListWidget
+        from rustspice_gui.viewer import SignalListWidget
 
         widget = SignalListWidget()
         qtbot.addWidget(widget)
@@ -237,13 +237,13 @@ class TestCursorManager:
 
     def test_import(self):
         """Test that CursorManager can be imported."""
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
         assert CursorManager is not None
 
     def test_add_cursor(self, qtbot):
         """Test adding a cursor."""
         import pyqtgraph as pg
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
 
         plot = pg.PlotWidget()
         qtbot.addWidget(plot)
@@ -257,7 +257,7 @@ class TestCursorManager:
     def test_remove_cursor(self, qtbot):
         """Test removing a cursor."""
         import pyqtgraph as pg
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
 
         plot = pg.PlotWidget()
         qtbot.addWidget(plot)
@@ -272,7 +272,7 @@ class TestCursorManager:
     def test_cursor_position(self, qtbot):
         """Test cursor position get/set."""
         import pyqtgraph as pg
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
 
         plot = pg.PlotWidget()
         qtbot.addWidget(plot)
@@ -288,7 +288,7 @@ class TestCursorManager:
     def test_delta_measurement(self, qtbot):
         """Test delta measurement between two cursors."""
         import pyqtgraph as pg
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
 
         plot = pg.PlotWidget()
         qtbot.addWidget(plot)
@@ -307,7 +307,7 @@ class TestCursorManager:
     def test_clear_cursors(self, qtbot):
         """Test clearing all cursors."""
         import pyqtgraph as pg
-        from myspice_gui.viewer import CursorManager
+        from rustspice_gui.viewer import CursorManager
 
         plot = pg.PlotWidget()
         qtbot.addWidget(plot)
@@ -326,12 +326,12 @@ class TestCursorReadout:
 
     def test_import(self):
         """Test that CursorReadout can be imported."""
-        from myspice_gui.viewer import CursorReadout
+        from rustspice_gui.viewer import CursorReadout
         assert CursorReadout is not None
 
     def test_update_cursors(self, qtbot):
         """Test updating cursor readout."""
-        from myspice_gui.viewer.cursors import CursorReadout
+        from rustspice_gui.viewer.cursors import CursorReadout
 
         readout = CursorReadout()
         qtbot.addWidget(readout)
@@ -346,7 +346,7 @@ class TestCursorReadout:
 
     def test_format_engineering(self, qtbot):
         """Test engineering notation formatting."""
-        from myspice_gui.viewer.cursors import CursorReadout
+        from rustspice_gui.viewer.cursors import CursorReadout
 
         readout = CursorReadout()
         qtbot.addWidget(readout)

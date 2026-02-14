@@ -12,7 +12,7 @@ from typing import Optional, Any, Dict
 
 from PySide6.QtCore import QThread, Signal, QObject
 
-from ..client import MySpiceClient, RunResult, AcSweepType, ClientError
+from ..client import RustSpiceClient, RunResult, AcSweepType, ClientError
 
 
 class AnalysisType(Enum):
@@ -60,12 +60,12 @@ class SimulationWorker(QThread):
     error = Signal(str, list, str)  # error message, details, error code
     stopped = Signal()
 
-    def __init__(self, client: MySpiceClient, parent: Optional[QObject] = None):
+    def __init__(self, client: RustSpiceClient, parent: Optional[QObject] = None):
         """
         Initialize the worker.
 
         Args:
-            client: The MySpiceClient for server communication
+            client: The RustSpiceClient for server communication
             parent: Optional parent QObject
         """
         super().__init__(parent)
@@ -172,7 +172,7 @@ class ConnectionChecker(QThread):
 
     result = Signal(bool)
 
-    def __init__(self, client: MySpiceClient, parent: Optional[QObject] = None):
+    def __init__(self, client: RustSpiceClient, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._client = client
 

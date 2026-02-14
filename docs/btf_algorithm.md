@@ -866,4 +866,4 @@ function BTF_Decompose(A: SparseMatrix) -> BtfDecomposition:
 
 *Document version: 1.0*
 *Last updated: 2024*
-*Author: MySpice Development Team*
+*Author: RustSpice Development Team*

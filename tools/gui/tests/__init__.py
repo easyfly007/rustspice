@@ -1,1 +1,1 @@
-"""Tests for MySpice GUI."""
+"""Tests for RustSpice GUI."""

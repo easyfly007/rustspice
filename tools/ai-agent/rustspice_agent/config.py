@@ -1,4 +1,4 @@
-"""Configuration management for MySpice AI Agent."""
+"""Configuration management for RustSpice AI Agent."""
 
 import os
 from dataclasses import dataclass, field
@@ -59,7 +59,7 @@ class Config:
 
         # Try to load from config file
         if config_path is None:
-            config_path = Path.home() / ".myspice" / "config.toml"
+            config_path = Path.home() / ".rustspice" / "config.toml"
 
         if config_path.exists() and tomllib is not None:
             with open(config_path, "rb") as f:
@@ -96,17 +96,17 @@ class Config:
     def _apply_env(self) -> None:
         """Apply configuration from environment variables."""
         # API settings
-        if url := os.environ.get("MYSPICE_API_URL"):
+        if url := os.environ.get("RUSTSPICE_API_URL"):
             self.api.url = url
-        if timeout := os.environ.get("MYSPICE_TIMEOUT"):
+        if timeout := os.environ.get("RUSTSPICE_TIMEOUT"):
             self.api.timeout = float(timeout)
 
         # AI settings
-        if model := os.environ.get("MYSPICE_MODEL"):
+        if model := os.environ.get("RUSTSPICE_MODEL"):
             self.ai.model = model
         if api_key := os.environ.get("ANTHROPIC_API_KEY"):
             self.ai.api_key = api_key
 
         # Output settings
-        if precision := os.environ.get("MYSPICE_PRECISION"):
+        if precision := os.environ.get("RUSTSPICE_PRECISION"):
             self.output.precision = int(precision)

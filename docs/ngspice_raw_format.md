@@ -1,6 +1,6 @@
 # Ngspice Raw Format Support
 
-MySpice supports exporting simulation results in the ngspice raw file format, which is widely compatible with SPICE waveform viewers including ngspice, LTspice, gwave, and others.
+RustSpice supports exporting simulation results in the ngspice raw file format, which is widely compatible with SPICE waveform viewers including ngspice, LTspice, gwave, and others.
 
 ## Usage
 
@@ -98,7 +98,7 @@ For complex data (AC analysis):
 ### Operating Point Output
 
 ```
-Title: MySpice v0.1.0 Simulation
+Title: RustSpice v0.1.0 Simulation
 Date: 2026-02-01T12:00:00Z
 Plotname: Operating Point
 Flags: real
@@ -115,7 +115,7 @@ Values:
 ### DC Sweep Output
 
 ```
-Title: MySpice v0.1.0 Simulation
+Title: RustSpice v0.1.0 Simulation
 Date: 2026-02-01T12:00:00Z
 Plotname: DC transfer characteristic
 Flags: real
@@ -138,7 +138,7 @@ Values:
 ### Transient Output
 
 ```
-Title: MySpice v0.1.0 Simulation
+Title: RustSpice v0.1.0 Simulation
 Date: 2026-02-01T12:00:00Z
 Plotname: Transient Analysis
 Flags: real
@@ -161,7 +161,7 @@ Values:
 ### AC Analysis Output
 
 ```
-Title: MySpice v0.1.0 Simulation
+Title: RustSpice v0.1.0 Simulation
 Date: 2026-02-01T12:00:00Z
 Plotname: AC Analysis
 Flags: complex
@@ -185,7 +185,7 @@ Values:
 
 ### AC Analysis Complex Values
 
-For AC analysis, MySpice internally stores results as magnitude (dB) and phase (degrees). When writing to raw format, these are converted to complex representation:
+For AC analysis, RustSpice internally stores results as magnitude (dB) and phase (degrees). When writing to raw format, these are converted to complex representation:
 
 ```
 magnitude = 10^(magnitude_dB / 20)
