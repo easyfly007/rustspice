@@ -63,6 +63,9 @@ enum OutputFormat {
 }
 
 fn main() {
+    let all_args: Vec<String> = env::args().collect();
+    eprintln!("command: {}", all_args[0]);
+    eprintln!("args: {:?}", &all_args[1..]);
     let mut args = env::args().skip(1).peekable();
     let mut netlist_path: Option<String> = None;
     let mut output_path: Option<PathBuf> = None;
