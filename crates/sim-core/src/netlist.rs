@@ -157,7 +157,7 @@ pub fn parse_netlist(input: &str) -> NetlistAst {
             if pending_line.is_empty() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: "续行没有对应的上一行".to_string(),
+                    message: "continuation line has no preceding line".to_string(),
                 });
                 continue;
             }
@@ -225,7 +225,7 @@ fn parse_statement(
             } else {
                 errors.push(ParseError {
                     line: line_no,
-                    message: "model 语句缺少 name/type".to_string(),
+                    message: "model statement missing name/type".to_string(),
                 });
             }
         }
@@ -239,7 +239,7 @@ fn parse_statement(
             } else {
                 errors.push(ParseError {
                     line: line_no,
-                    message: "subckt 语句缺少名称".to_string(),
+                    message: "subckt statement missing name".to_string(),
                 });
             }
         }
@@ -278,7 +278,7 @@ fn parse_statement(
     if matches!(kind, DeviceKind::Unknown) {
         errors.push(ParseError {
             line: line_no,
-            message: format!("未知器件类型: {}", first),
+            message: format!("unknown device type: {}", first),
         });
     }
 
@@ -324,7 +324,7 @@ fn split_args_params(tokens: &[&str]) -> (Vec<String>, Vec<Param>) {
     let mut params = Vec::new();
 
     for token in tokens {
-        // 只在括号深度为 0 时按逗号分割，避免分割表达式内的逗号
+        // Only split on commas at parenthesis depth 0 to avoid splitting inside expressions
         let parts: Vec<&str> = if token.contains('=') && token.contains(',') {
             split_at_top_level_commas(token)
         } else {
@@ -362,7 +362,7 @@ fn split_args_params(tokens: &[&str]) -> (Vec<String>, Vec<Param>) {
     (args, params)
 }
 
-/// 只在括号深度为 0 时按逗号分割字符串
+/// Split a string on commas only at parenthesis depth 0.
 fn split_at_top_level_commas(s: &str) -> Vec<&str> {
     let mut result = Vec::new();
     let mut depth: i32 = 0;
@@ -449,23 +449,23 @@ fn split_device_fields(
             }
         }
         DeviceKind::E | DeviceKind::G => {
-            // 检查是否有 POLY 语法
+            // Check for POLY syntax
             let poly_idx = args.iter().position(|a| is_poly_token(a));
             if let Some(idx) = poly_idx {
-                // POLY 语法: E1 out 0 POLY(n) ctrl1+ ctrl1- ... coeffs
-                // 或者: E1 out 0 in 0 POLY(n) ctrl2+ ctrl2- ... coeffs
-                // 输出节点总是前 2 个
+                // POLY syntax: E1 out 0 POLY(n) ctrl1+ ctrl1- ... coeffs
+                // or: E1 out 0 in 0 POLY(n) ctrl2+ ctrl2- ... coeffs
+                // Output nodes are always the first 2
                 if args.len() >= 2 {
                     nodes.extend_from_slice(&args[0..2]);
                 }
-                // POLY 之前的额外节点是第一组控制节点
+                // Extra nodes before POLY are the first group of control nodes
                 if idx > 2 {
                     extras.extend_from_slice(&args[2..idx]);
                 }
-                // POLY 及之后的内容
+                // POLY and everything after it
                 extras.extend_from_slice(&args[idx..]);
             } else if args.len() >= 5 {
-                // 普通语法: E1 out 0 in 0 gain
+                // Normal syntax: E1 out 0 in 0 gain
                 nodes.extend_from_slice(&args[0..4]);
                 value = Some(args[4].clone());
                 if args.len() > 5 {
@@ -476,18 +476,18 @@ fn split_device_fields(
             }
         }
         DeviceKind::F | DeviceKind::H => {
-            // 检查是否有 POLY 语法
+            // Check for POLY syntax
             let poly_idx = args.iter().position(|a| is_poly_token(a));
             if let Some(idx) = poly_idx {
-                // POLY 语法: F1 out 0 POLY(n) V1 V2 ... coeffs
+                // POLY syntax: F1 out 0 POLY(n) V1 V2 ... coeffs
                 if args.len() >= 2 {
                     nodes.extend_from_slice(&args[0..2]);
                 }
-                // POLY 及之后的内容
+                // POLY and everything after it
                 extras.extend_from_slice(&args[idx..]);
             } else if args.len() >= 4 {
-                // 普通语法: F1 out 0 Vctrl gain
-                // control 由 extract_control_name 提取
+                // Normal syntax: F1 out 0 Vctrl gain
+                // control is extracted by extract_control_name
                 nodes.extend_from_slice(&args[0..2]);
                 value = Some(args[3].clone());
                 if args.len() > 4 {
@@ -578,7 +578,7 @@ fn validate_device_fields(
     if nodes.is_empty() {
         errors.push(ParseError {
             line: line_no,
-            message: format!("器件缺少节点定义: {} {}", name, format_fields(nodes, model, control, value, extras, poly)),
+            message: format!("device missing node definitions: {} {}", name, format_fields(nodes, model, control, value, extras, poly)),
         });
         return;
     }
@@ -593,7 +593,7 @@ fn validate_device_fields(
                 errors.push(ParseError {
                     line: line_no,
                     message: format!(
-                        "{} 需要 2 个节点，当前={} {}",
+                        "{} requires 2 nodes, got={} {}",
                         name,
                         nodes.len(),
                         format_fields(nodes, model, control, value, extras, poly)
@@ -603,13 +603,13 @@ fn validate_device_fields(
             if value.is_none() && !(matches!(kind, DeviceKind::V | DeviceKind::I) && has_waveform(extras)) {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少数值 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing value {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if matches!(kind, DeviceKind::R | DeviceKind::C | DeviceKind::L) && !extras.is_empty() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 存在多余字段 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} has extra fields {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if matches!(kind, DeviceKind::V | DeviceKind::I)
@@ -618,7 +618,7 @@ fn validate_device_fields(
             {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 存在多余字段 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} has extra fields {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if matches!(kind, DeviceKind::V | DeviceKind::I) {
@@ -626,7 +626,7 @@ fn validate_device_fields(
                     if extras.len() == 1 {
                         errors.push(ParseError {
                             line: line_no,
-                            message: format!("{} 波形 {} 缺少参数 {}", name, wave, format_fields(nodes, model, control, value, extras, poly)),
+                            message: format!("{} waveform {} missing parameters {}", name, wave, format_fields(nodes, model, control, value, extras, poly)),
                         });
                     }
                 }
@@ -637,7 +637,7 @@ fn validate_device_fields(
                 errors.push(ParseError {
                     line: line_no,
                     message: format!(
-                        "{} 需要 2 个节点，当前={} {}",
+                        "{} requires 2 nodes, got={} {}",
                         name,
                         nodes.len(),
                         format_fields(nodes, model, control, value, extras, poly)
@@ -647,7 +647,7 @@ fn validate_device_fields(
             if model.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少模型名 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing model name {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
         }
@@ -656,7 +656,7 @@ fn validate_device_fields(
                 errors.push(ParseError {
                     line: line_no,
                     message: format!(
-                        "{} 需要至少 4 个节点，当前={} {}",
+                        "{} requires at least 4 nodes, got={} {}",
                         name,
                         nodes.len(),
                         format_fields(nodes, model, control, value, extras, poly)
@@ -666,18 +666,18 @@ fn validate_device_fields(
             if model.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少模型名 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing model name {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
         }
         DeviceKind::E | DeviceKind::G => {
             if poly.is_some() {
-                // POLY 语法: 输出节点 2 个
+                // POLY syntax: 2 output nodes
                 if nodes.len() != 2 {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "{} POLY 需要 2 个输出节点，当前={} {}",
+                            "{} POLY requires 2 output nodes, got={} {}",
                             name,
                             nodes.len(),
                             format_fields(nodes, model, control, value, extras, poly)
@@ -685,12 +685,12 @@ fn validate_device_fields(
                     });
                 }
             } else {
-                // 普通语法: 4 个节点 (out+ out- in+ in-)
+                // Normal syntax: 4 nodes (out+ out- in+ in-)
                 if nodes.len() != 4 {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "{} 需要 4 个节点，当前={} {}",
+                            "{} requires 4 nodes, got={} {}",
                             name,
                             nodes.len(),
                             format_fields(nodes, model, control, value, extras, poly)
@@ -701,25 +701,25 @@ fn validate_device_fields(
             if value.is_none() && poly.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少增益值 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing gain value {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if poly.is_none() && !extras.is_empty() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 存在多余字段 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} has extra fields {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if let Some(spec) = poly {
-                // POLY 后面的内容 (coeffs): 控制节点 + 系数
-                // 控制节点数量 = degree * 2 (每对是 v+ v-)
-                // POLY 之前的内容（如 in 0）是可选的兼容语法，不计入控制节点
+                // Content after POLY (coeffs): control nodes + coefficients
+                // Number of control nodes = degree * 2 (each pair is v+ v-)
+                // Content before POLY (e.g. in 0) is optional compatibility syntax, not counted as control nodes
                 let expected_controls = spec.degree * 2;
                 if spec.coeffs.len() < expected_controls {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "{} POLY 控制节点数量不足，期望={} 实际={} {}",
+                            "{} POLY insufficient control nodes, expected={} got={} {}",
                             name,
                             expected_controls,
                             spec.coeffs.len(),
@@ -727,13 +727,13 @@ fn validate_device_fields(
                         ),
                     });
                 } else {
-                    // 系数是控制节点之后的部分
+                    // Coefficients are the part after control nodes
                     let actual_coeffs = spec.coeffs.len() - expected_controls;
                     if actual_coeffs < spec.degree + 1 {
                         errors.push(ParseError {
                             line: line_no,
                             message: format!(
-                                "{} POLY 系数数量不足，期望>={} 实际={} {}",
+                                "{} POLY insufficient coefficients, expected>={} got={} {}",
                                 name,
                                 spec.degree + 1,
                                 actual_coeffs,
@@ -749,7 +749,7 @@ fn validate_device_fields(
                 errors.push(ParseError {
                     line: line_no,
                     message: format!(
-                        "{} 需要 2 个节点，当前={} {}",
+                        "{} requires 2 nodes, got={} {}",
                         name,
                         nodes.len(),
                         format_fields(nodes, model, control, value, extras, poly)
@@ -759,30 +759,30 @@ fn validate_device_fields(
             if control.is_none() && poly.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少控制源 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing control source {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if value.is_none() && poly.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少增益值 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing gain value {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if poly.is_none() && !extras.is_empty() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 存在多余字段 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} has extra fields {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if let Some(spec) = poly {
-                // POLY 后面的内容: 控制源名称 + 系数
-                // 控制源数量 = degree
+                // Content after POLY: control source names + coefficients
+                // Number of control sources = degree
                 let expected_controls = spec.degree;
                 if spec.coeffs.len() < expected_controls {
                     errors.push(ParseError {
                         line: line_no,
                         message: format!(
-                            "{} POLY 控制源数量不足，期望={} 实际={} {}",
+                            "{} POLY insufficient control sources, expected={} got={} {}",
                             name,
                             expected_controls,
                             spec.coeffs.len(),
@@ -790,13 +790,13 @@ fn validate_device_fields(
                         ),
                     });
                 } else {
-                    // 系数是控制源之后的部分
+                    // Coefficients are the part after control sources
                     let actual_coeffs = spec.coeffs.len() - expected_controls;
                     if actual_coeffs < spec.degree + 1 {
                         errors.push(ParseError {
                             line: line_no,
                             message: format!(
-                                "{} POLY 系数数量不足，期望>={} 实际={} {}",
+                                "{} POLY insufficient coefficients, expected>={} got={} {}",
                                 name,
                                 spec.degree + 1,
                                 actual_coeffs,
@@ -811,13 +811,13 @@ fn validate_device_fields(
             if nodes.is_empty() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少节点 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing nodes {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
             if model.is_none() {
                 errors.push(ParseError {
                     line: line_no,
-                    message: format!("{} 缺少子电路名 {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                    message: format!("{} missing subcircuit name {}", name, format_fields(nodes, model, control, value, extras, poly)),
                 });
             }
         }
@@ -865,7 +865,7 @@ pub fn elaborate_netlist(ast: &NetlistAst) -> ElaboratedNetlist {
                     }
                     errors.push(ParseError {
                         line: device.line,
-                        message: format!("子电路未定义: {:?}", device.model),
+                        message: format!("subcircuit not defined: {:?}", device.model),
                     });
                     let mut fallback = device.clone();
                     apply_params_to_device_scoped(&param_table, &std::collections::HashMap::new(), &mut fallback);
@@ -1168,7 +1168,7 @@ fn read_with_includes(
     if !visited.insert(path.to_path_buf()) {
         errors.push(ParseError {
             line: 0,
-            message: format!("include 循环引用: {}", path.display()),
+            message: format!("include circular reference: {}", path.display()),
         });
         return String::new();
     }
@@ -1176,7 +1176,7 @@ fn read_with_includes(
     let content = std::fs::read_to_string(path).unwrap_or_else(|_| {
         errors.push(ParseError {
             line: 0,
-            message: format!("无法读取文件: {}", path.display()),
+            message: format!("cannot read file: {}", path.display()),
         });
         String::new()
     });
@@ -1195,7 +1195,7 @@ fn read_with_includes(
             if include_path.is_empty() {
                 errors.push(ParseError {
                     line: 0,
-                    message: format!("include 语句缺少路径: {}", path.display()),
+                    message: format!("include statement missing path: {}", path.display()),
                 });
                 continue;
             }
@@ -1331,7 +1331,7 @@ fn extract_subckts(statements: &[Stmt]) -> (Vec<Stmt>, Vec<SubcktDef>, Vec<Parse
                 if !found_ends {
                     errors.push(ParseError {
                         line,
-                        message: format!("subckt {} 缺少 .ends", name),
+                        message: format!("subckt {} missing .ends", name),
                     });
                 }
 
@@ -1380,7 +1380,7 @@ fn map_subckt_node(
     port_map: &std::collections::HashMap<String, String>,
     node: &str,
 ) -> String {
-    // SPICE 节点名大小写不敏感，使用小写查找
+    // SPICE node names are case-insensitive, use lowercase for lookup
     if let Some(mapped) = port_map.get(&node.to_ascii_lowercase()) {
         return mapped.clone();
     }
@@ -1831,7 +1831,7 @@ fn expand_subckt_instance_recursive(
         nested_map.entry(name.clone()).or_insert_with(|| def.clone());
     }
 
-    // 构建端口映射：子电路端口 -> 实例节点
+    // Build port mapping: subcircuit ports -> instance nodes
     let mut port_map = std::collections::HashMap::new();
     for (port, node) in def.ports.iter().zip(instance.nodes.iter()) {
         port_map.insert(port.to_ascii_lowercase(), node.clone());
@@ -1874,7 +1874,7 @@ fn expand_subckt_instance_recursive(
                     }
                     errors.push(ParseError {
                         line: scoped.line,
-                        message: format!("子电路未定义: {:?}", scoped.model),
+                        message: format!("subcircuit not defined: {:?}", scoped.model),
                     });
                 }
 

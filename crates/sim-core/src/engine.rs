@@ -24,7 +24,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// 使用指定的求解器类型创建 Engine
+    /// Create an Engine with the specified solver type.
     pub fn new(circuit: Circuit, solver_type: SolverType) -> Self {
         let node_count = circuit.nodes.id_to_name.len();
         Self {
@@ -34,18 +34,18 @@ impl Engine {
         }
     }
 
-    /// 使用默认求解器（Dense）创建 Engine
+    /// Create an Engine with the default solver (Dense).
     pub fn new_default(circuit: Circuit) -> Self {
         Self::new(circuit, SolverType::default())
     }
 
-    /// 当电路大小变化时，重新初始化 solver
+    /// Reinitialize the solver when the circuit size changes.
     pub fn resize_solver(&mut self) {
         let node_count = self.circuit.nodes.id_to_name.len();
         self.solver = create_solver(self.solver_type, node_count);
     }
 
-    /// 切换求解器类型
+    /// Switch to a different solver type.
     pub fn set_solver_type(&mut self, solver_type: SolverType) {
         self.solver_type = solver_type;
         self.resize_solver();
@@ -84,6 +84,21 @@ impl Engine {
         let _ = self.run_tran_result_with_params(1e-6, 1e-5, 0.0, 1e-5);
     }
 
+    /// Perform a DC operating-point analysis and return the result.
+    ///
+    /// This function finds the steady-state (DC) solution of the circuit by:
+    ///   1. Building the MNA (Modified Nodal Analysis) matrix and RHS vector
+    ///      by stamping every device instance at the current operating point.
+    ///   2. Pinning the ground node to 0 V so the matrix is non-singular.
+    ///   3. Solving the nonlinear system with Newton-Raphson iteration
+    ///      (with source stepping / gmin stepping for convergence aid).
+    ///
+    /// On return, the `RunResult` contains:
+    ///   - `solution`: a `Vec<f64>` of node voltages (index = NodeId), valid
+    ///     only when `status` is `Converged`.
+    ///   - `node_names`: mapping from index to human-readable node name.
+    ///   - `iterations`: number of Newton iterations consumed.
+    ///   - `status`: `Converged`, `MaxIters`, or `Failed`.
     fn run_dc_result(&mut self, analysis: AnalysisType) -> RunResult {
         let config = NewtonConfig::default();
         let node_count = self.circuit.nodes.id_to_name.len();
@@ -99,7 +114,7 @@ impl Engine {
                 let mut ctx = mna.context_with(gmin, source_scale);
                 let _ = stamp.stamp_dc(&mut ctx, Some(x));
             }
-            // 固定地节点，避免矩阵奇异
+            // Pin the ground node to avoid a singular matrix.
             mna.builder.insert(gnd, gnd, 1.0);
             let (ap, ai, ax) = mna.builder.finalize();
             (ap, ai, ax, mna.rhs, mna.builder.n)
