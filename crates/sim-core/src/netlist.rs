@@ -1,3 +1,8 @@
+/// The raw syntax tree produced by parsing a SPICE netlist file.
+/// It captures every line as a `Stmt` (device instance, control directive,
+/// comment, etc.) without interpreting circuit semantics.
+/// After parsing, `statements` holds the ordered list of parsed statements
+/// and `errors` collects any syntax problems encountered during parsing.
 #[derive(Debug, Clone)]
 pub struct NetlistAst {
     pub title: Option<String>,
@@ -114,6 +119,11 @@ pub struct SubcktDef {
     pub line: usize,
 }
 
+/// Parse a SPICE netlist file (`.cir`) into a `NetlistAst`.
+/// This reads the file (resolving `.include` directives recursively),
+/// splits it into lines, and converts each line into a `Stmt` variant.
+/// The result is a purely syntactic representation of the netlist —
+/// it knows *what was written* but not *what it means* electrically.
 pub fn parse_netlist_file(path: &std::path::Path) -> NetlistAst {
     let mut errors = Vec::new();
     let mut visited = std::collections::HashSet::new();
@@ -881,6 +891,16 @@ pub fn elaborate_netlist(ast: &NetlistAst) -> ElaboratedNetlist {
     }
 }
 
+/// Build a `Circuit` from the parsed AST and elaboration results.
+/// This transforms the raw syntax into a simulation-ready data structure:
+///   - Every unique net name is mapped to a `NodeId` in the `NodeTable`.
+///   - `.model` directives become entries in the `ModelTable` with parsed parameters.
+///   - Device lines (R, C, L, V, I, M, D, …) become `Instance` entries in
+///     the `InstanceTable`, each linked to its terminal nodes and model.
+///   - Analysis commands (`.op`, `.dc`, `.tran`, `.ac`) are collected into
+///     `Circuit::analysis`.
+/// After this function returns, the `Circuit` is ready to be fed into
+/// the simulation `Engine` for MNA matrix construction and solving.
 pub fn build_circuit(ast: &NetlistAst, elab: &ElaboratedNetlist) -> crate::circuit::Circuit {
     use crate::circuit::{AnalysisCmd, Circuit, DeviceKind as CircuitDeviceKind, Instance, Model, PolySpec as CircuitPolySpec};
     use std::collections::HashMap;
