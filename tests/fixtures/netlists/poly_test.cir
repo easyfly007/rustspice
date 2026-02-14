@@ -1,0 +1,23 @@
+* POLY Controlled Source Test
+* Tests POLY(1) linear and nonlinear sources
+
+* Power supply
+V1 vdd 0 DC 5
+
+* Input voltage source
+Vin in 0 DC 2
+
+* Simple VCVS with POLY(1): Vout = 1 + 2*Vin
+E1 out1 0 POLY(1) in 0 1.0 2.0
+
+* VCCS with POLY(1): Iout = 0.001 * Vin (1mS transconductance)
+* With load resistor, Vout2 = -Iout * R = -0.001 * Vin * 1000 = -Vin
+G1 out2 0 POLY(1) in 0 0.0 0.001
+R1 out2 0 1k
+
+* Quadratic VCVS: Vout = 0.5 + 0.1*Vin + 0.05*Vin^2
+* At Vin=2: Vout = 0.5 + 0.2 + 0.2 = 0.9
+E2 out3 0 POLY(1) in 0 0.5 0.1 0.05
+
+.op
+.end

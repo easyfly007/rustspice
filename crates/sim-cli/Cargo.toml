@@ -1,0 +1,8 @@
+[package]
+name = "sim-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sim-api = { path = "../sim-api" }
+sim-core = { path = "../sim-core" }

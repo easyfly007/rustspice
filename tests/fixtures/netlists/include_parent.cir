@@ -1,0 +1,4 @@
+* include parent
+.include "include_child.cir"
+R2 out 0 2k
+.end

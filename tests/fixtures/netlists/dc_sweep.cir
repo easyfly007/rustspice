@@ -1,0 +1,7 @@
+* DC Sweep test - Resistor divider
+* Sweep V1 from 0 to 5V, expect Vout = Vin * 2/3
+V1 in 0 DC 0
+R1 in out 1k
+R2 out 0 2k
+.dc V1 0 5 1
+.end

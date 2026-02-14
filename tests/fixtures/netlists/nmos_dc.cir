@@ -1,0 +1,12 @@
+* NMOS DC Operating Point Test
+* Simple NMOS with fixed bias
+
+Vdd vdd 0 DC 1.8
+Vgs gate 0 DC 1.2
+
+M1 vdd gate 0 0 NMOS W=1u L=100n
+
+.model NMOS NMOS (LEVEL=49 VTH0=0.4 U0=400 TOX=2e-9)
+
+.op
+.end

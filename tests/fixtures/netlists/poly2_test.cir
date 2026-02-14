@@ -1,0 +1,20 @@
+* POLY(2) Two-Input Controlled Source Test
+* Tests multiplier and adder configurations
+
+* Input voltages
+V1 a 0 DC 3
+V2 b 0 DC 2
+
+* Adder: Vout = 2*Va + 3*Vb = 2*3 + 3*2 = 12
+E_add out1 0 POLY(2) a 0 b 0 0.0 2.0 3.0
+
+* Multiplier: Vout = Va * Vb = 3 * 2 = 6
+* POLY(2) coeffs: c0 + c1*x1 + c2*x2 + c3*x1*x2
+* We want only x1*x2 term, so coeffs = 0 0 0 1
+E_mult out2 0 POLY(2) a 0 b 0 0.0 0.0 0.0 1.0
+
+* Combined: Vout = 1 + 0.5*Va + 0.5*Vb + 0.1*Va*Vb = 1 + 1.5 + 1 + 0.6 = 4.1
+E_comb out3 0 POLY(2) a 0 b 0 1.0 0.5 0.5 0.1
+
+.op
+.end
