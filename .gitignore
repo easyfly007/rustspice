@@ -1,2 +1,7 @@
 /target
 .vscode/
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/

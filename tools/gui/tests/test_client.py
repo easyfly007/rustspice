@@ -90,6 +90,60 @@ class TestRunResult:
         assert result.analysis == AnalysisType.AC
         assert result.ac_frequencies == [1.0, 10.0, 100.0]
 
+    def test_ac_values_returns_mag_phase_pairs(self):
+        """Test that ac_values returns [mag_dB, phase_deg] pairs directly.
+
+        The sim-api server returns AC data already converted to dB and degrees.
+        The GUI must NOT re-interpret these as complex(real, imag).
+        """
+        data = {
+            "run_id": 10,
+            "analysis": "Ac",
+            "status": "Success",
+            "iterations": 0,
+            "nodes": ["in", "out"],
+            "solution": [],
+            "ac_frequencies": [1.0, 100.0, 10000.0],
+            "ac_solutions": [
+                [[0.0, 0.0], [-0.001, -0.36]],   # freq=1 Hz
+                [[0.0, 0.0], [-3.0, -45.0]],      # freq=100 Hz (near cutoff)
+                [[0.0, 0.0], [-40.0, -88.0]],     # freq=10 kHz
+            ],
+        }
+        result = RunResult.from_dict(data)
+        ac = result.ac_values
+
+        # "out" node should have the [mag_dB, phase_deg] pairs
+        assert "out" in ac
+        out_values = ac["out"]
+        assert len(out_values) == 3
+
+        # Each entry is [mag_dB, phase_deg] — use directly, no conversion
+        assert out_values[0] == [-0.001, -0.36]
+        assert out_values[1] == [-3.0, -45.0]
+        assert out_values[2] == [-40.0, -88.0]
+
+        # Verify mag_dB can be extracted with simple indexing
+        mag_db = [pair[0] for pair in out_values]
+        phase_deg = [pair[1] for pair in out_values]
+        assert mag_db == [-0.001, -3.0, -40.0]
+        assert phase_deg == [-0.36, -45.0, -88.0]
+
+    def test_ac_values_empty_when_no_data(self):
+        """Test ac_values returns empty dict when no AC data present."""
+        data = {
+            "run_id": 11,
+            "analysis": "Ac",
+            "status": "Success",
+            "iterations": 0,
+            "nodes": ["in", "out"],
+            "solution": [],
+            "ac_frequencies": [],
+            "ac_solutions": [],
+        }
+        result = RunResult.from_dict(data)
+        assert result.ac_values == {}
+
     def test_from_dict_unknown_analysis(self):
         """Test handling unknown analysis type."""
         data = {

@@ -4,6 +4,41 @@
 
 ---
 
+## 2026-02-16 - GUI Phase 3-4: End-to-End Verification & Bug Fixes
+
+### Bug Fixes
+
+#### Critical: AC Bode Plot Double-Conversion Bug
+**File**: `tools/gui/rustspice_gui/main_window.py`
+
+The sim-api server returns AC data as `[magnitude_dB, phase_degrees]` pairs, but `_plot_ac_results()` was incorrectly interpreting them as `complex(real, imag)`, recomputing `abs()` and `cmath.phase()`, then converting to dB again. This produced completely wrong Bode plots.
+
+**Example**: Server sends `[-3.0, -45.0]` (correct: -3 dB at -45 degrees). Old code computed `complex(-3, -45)` -> `abs=45.1` -> `20*log10(45.1)=33.1 dB` instead of `-3.0 dB`.
+
+**Fix**: Use `[mag_dB, phase_deg]` pairs directly from the server without re-conversion. Removed unused `import cmath`.
+
+#### sim-api Route Syntax Fix
+**File**: `crates/sim-api/src/http.rs`
+
+Updated axum route path parameters from old `:id` syntax to new `{id}` syntax (required by axum 0.7+). The server was panicking at startup with "Path segments must not start with `:`".
+
+### Improvements
+
+#### Public `get_signal_color()` API for Viewers
+**Files**: `waveform.py`, `bode.py`, `fft.py`
+
+Added `get_signal_color(name) -> Optional[str]` public method to `WaveformViewer`, `BodePlot`, and `FftViewer`. Updated `main_window.py` to use these instead of accessing private `_signals[name].color`.
+
+### Verification
+
+- All 4 sim-api endpoints tested with curl (OP, DC, TRAN, AC)
+- AC endpoint confirmed to return data in dB/degrees format
+- RC LPF test: -3 dB at 159 Hz, -45 degrees (matches theory)
+- 136/137 Python tests pass (1 pre-existing failure in editor completion test)
+- 2 new AC data interpretation tests added and passing
+
+---
+
 ## 2026-02-03 - GUI Phase 2: Syntax Highlighting Editor
 
 ### 已完成
@@ -762,6 +797,7 @@ R2 out 0 2k
 
 | 日期 | 版本 | 主要变更 |
 |------|------|----------|
+| 2026-02-16 | - | **GUI Phase 3-4: AC Bode plot bug fix, sim-api route fix, end-to-end verification** |
 | 2026-02-02 | - | **AI Agent 集成** |
 | 2026-02-02 | - | **KLU 稀疏求解器完整实现** |
 | 2026-02-01 | - | **DC Sweep PSF 输出格式修复** |

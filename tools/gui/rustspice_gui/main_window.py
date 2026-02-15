@@ -9,7 +9,6 @@ Provides the main window with dockable panels for:
 - Console output
 """
 
-import cmath
 import re
 from pathlib import Path
 from typing import Optional
@@ -1057,7 +1056,7 @@ C1 out 0 100n
             if node != "0":  # Skip ground
                 name = f"V({node})"
                 waveform.add_signal(name, x_data, values)
-                color = waveform._signals[name].color if name in waveform._signals else "#1f77b4"
+                color = waveform.get_signal_color(name) or "#1f77b4"
                 self._signal_list.add_signal(name, color)
 
         waveform.auto_scale()
@@ -1083,7 +1082,7 @@ C1 out 0 100n
             if node != "0":  # Skip ground
                 name = f"V({node})"
                 waveform.add_signal(name, x_data, values)
-                color = waveform._signals[name].color if name in waveform._signals else "#1f77b4"
+                color = waveform.get_signal_color(name) or "#1f77b4"
                 self._signal_list.add_signal(name, color)
                 # Feed time-domain data to FFT viewer
                 fft.set_time_data(name, x_data, values, color)
@@ -1095,9 +1094,11 @@ C1 out 0 100n
         self._signal_dock.raise_()
 
     def _plot_ac_results(self, result: RunResult):
-        """Plot AC results in Bode plot."""
-        import math
+        """Plot AC results in Bode plot.
 
+        The sim-api server returns AC data as [magnitude_dB, phase_degrees]
+        pairs, so we pass them directly to the Bode plot widget.
+        """
         bode = self._viewer_panel.get_bode_plot()
         bode.clear()
         self._signal_list.clear()
@@ -1107,29 +1108,15 @@ C1 out 0 100n
 
         frequencies = result.ac_frequencies
 
-        for node, complex_values in result.ac_values.items():
+        for node, ac_pairs in result.ac_values.items():
             if node != "0":  # Skip ground
                 name = f"V({node})"
-                # Convert complex values to magnitude (dB) and phase (degrees)
-                magnitude_db = []
-                phase_deg = []
-                for cval in complex_values:
-                    if isinstance(cval, complex):
-                        mag = abs(cval)
-                        phase = cmath.phase(cval)
-                    else:
-                        # Handle as [real, imag] list
-                        c = complex(cval[0], cval[1]) if isinstance(cval, (list, tuple)) else complex(cval)
-                        mag = abs(c)
-                        phase = cmath.phase(c)
-
-                    # Convert to dB (avoid log(0))
-                    mag_db = 20 * math.log10(mag) if mag > 0 else -200
-                    magnitude_db.append(mag_db)
-                    phase_deg.append(math.degrees(phase))
+                # ac_pairs is a list of [mag_dB, phase_deg] per frequency point
+                magnitude_db = [pair[0] for pair in ac_pairs]
+                phase_deg = [pair[1] for pair in ac_pairs]
 
                 bode.add_signal(name, frequencies, magnitude_db, phase_deg)
-                color = bode._signals[name].color if name in bode._signals else "#1f77b4"
+                color = bode.get_signal_color(name) or "#1f77b4"
                 self._signal_list.add_signal(name, color)
 
         bode.auto_scale()

@@ -436,6 +436,12 @@ class FftViewer(QWidget):
         """Get list of signal names."""
         return list(self._signals.keys())
 
+    def get_signal_color(self, name: str) -> Optional[str]:
+        """Get the color of a signal, or None if not found."""
+        if name in self._signals:
+            return self._signals[name].color
+        return None
+
     def clear(self):
         """Clear all signals and time data."""
         for name in list(self._signals.keys()):
