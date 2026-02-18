@@ -464,37 +464,38 @@ AI 代理通过工具调用协议访问 API，获取电路与仿真结果信息�
 
 详见 `docs/bsim4_model.md` 获取完整参数参考。
 
-## Solver 规划（KLU）
+## 线性求解器
 
-仿真引擎将直接使用 SuiteSparse 的 KLU 作为稀疏线性求解器。
+RustSpice 提供 6 种线性求解器后端，通过 `LinearSolver` trait 统一接口：
 
-### KLU 调用链
+| 求解器 | 依赖 | 适用场景 | 说明 |
+|--------|------|---------|------|
+| Dense | 无 | n < 100 | O(n³) LU 分解 |
+| SparseLU | 无 (Rust) | 100-5000 | AMD 排序 + left-looking LU |
+| SparseLU-BTF | 无 (Rust) | 块结构矩阵 | BTF 分块 + 独立 LU |
+| BBD | 无 (Rust) | n ≥ 200 稀疏 | 图分割 + Schur 补方法 |
+| Faer | Pure Rust | 通用 | 默认启用，无需配置 |
+| KLU | SuiteSparse (C) | 大规模 | 最快，需安装 SuiteSparse |
 
-```
-1) 初始化:
-   klu_defaults(&mut common)
-   klu_analyze(n, Ap, Ai, &mut common)
+自动选择逻辑（`SolverType::Auto`）：n ≤ 50 用 Dense → 有 KLU 用 KLU → 有 Faer 用 Faer → 有块结构用 BTF → n ≥ 200 稀疏用 BBD → 默认 SparseLU。
 
-2) 每次迭代:
-   更新 Ax
-   klu_factor(Ap, Ai, Ax, symbolic, &mut common)
-   klu_solve(symbolic, numeric, n, 1, b, &mut common)
+### BBD 求解器（新）
 
-3) 结构变化时:
-   重新 klu_analyze
-```
+BBD (Bordered Block Diagonal) 通过图分割将矩阵分为独立子块 + 小 border，用 Schur 补方法求解。适合真实电路矩阵（通常只有一个大 SCC，BTF 无效）。当前状态：基础功能完成，待端到端验证和性能优化。详见 `docs/bbd_solver.md`。
 
-### 稀疏矩阵构建（CSC）
+### 稀疏矩阵格式（CSC）
 
 - `n`: 矩阵维度
 - `Ap: Vec<i64>`（列指针，长度 n+1）
 - `Ai: Vec<i64>`（行索引）
 - `Ax: Vec<f64>`（数值）
 
-### 构建集成
+### 构建选项
 
-- 使用 `--features klu` 启用 KLU
-- 需要设置 `KLU_LIB_DIR` 或 `SUITESPARSE_DIR`
+```bash
+cargo build                    # 默认含 Faer
+cargo build --features klu     # 启用 KLU（需安装 SuiteSparse）
+```
 
 ## 目录结构
 
@@ -513,8 +514,14 @@ rustspice/
 │   │   │   ├── topology.rs       # 拓扑分析
 │   │   │   ├── mna.rs            # MNA 构建
 │   │   │   ├── stamp.rs          # 器件 Stamp
-│   │   │   ├── solver.rs         # 线性求解
-│   │   │   ├── newton.rs         # 非线性迭代
+│   │   │   ├── solver.rs         # 线性求解（6 种后端）
+│   │   │   ├── sparse_lu.rs     # 原生稀疏 LU
+│   │   │   ├── sparse_lu_btf.rs # BTF 集成稀疏 LU
+│   │   │   ├── btf.rs           # 块三角形分解
+│   │   │   ├── amd.rs           # 近似最小度排序
+│   │   │   ├── bbd.rs           # BBD 图分割
+│   │   │   ├── bbd_solver.rs    # BBD Schur 补求解器
+│   │   │   ├── newton.rs        # 非线性迭代
 │   │   │   ├── engine.rs         # 仿真引擎
 │   │   │   ├── analysis.rs       # 分析配置
 │   │   │   ├── result_store.rs   # 结果存储
@@ -574,6 +581,10 @@ rustspice/
 │
 └── docs/                         # 文档
     ├── rustspice_user_manual.md
+    ├── solver_performance.md
+    ├── bbd_solver.md
+    ├── btf_algorithm.md
+    ├── amd_algorithm.md
     ├── klu_solver.md
     ├── adaptive_timestep_plan.md
     └── CHANGELOG.md
@@ -664,6 +675,7 @@ cargo test --workspace --exclude sim-cli
   - [x] PWL/PULSE 断点处理 ✅ Phase 4 完成
 
 ### 后续计划
+- [ ] BBD 求解器完善（端到端验证、稀疏 Schur 补、并行子块、METIS 分割）→ 详见 `docs/bbd_solver.md`
 - [ ] 更完善的受控源语法（POLY 细节）
 - [ ] API 服务完善
 - [ ] 大规模网表性能优化
@@ -704,6 +716,15 @@ Netlist -> 拓扑图 -> 自动布局 -> Qt 绘制
 详见 `docs/bsim_model.md`（包含 BSIM 模型概念、当前支持参数、简化计算与 stamp 说明）。
 
 ## 更新日志
+
+### 2026-02-18: BBD (Bordered Block Diagonal) 求解器
+- 新增 BBD 求解器：通过图分割 + Schur 补方法求解大规模稀疏矩阵
+- 可插拔分割算法框架（`Partitioner` trait），内置 BFS 递归二分法
+- 完整 `LinearSolver` trait 实现（analyze/factor/solve）
+- 自动降级：BBD 不划算时回退到 SparseLU
+- 集成到 `SolverType` 枚举和 `SolverSelector` 自动选择逻辑
+- 18 个单元测试（分割正确性、求解精度、与 DenseSolver 对比）
+- 详见 `docs/bbd_solver.md`（含完整 TODO 列表）
 
 ### 2026-01-31: AC 小信号分析
 - 实现完整 AC 频域分析功能
