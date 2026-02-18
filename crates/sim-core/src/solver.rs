@@ -8,6 +8,7 @@
 //! | Dense  | (always) | O(n³) | None |
 //! | SparseLU | (always) | O(nnz·fill) | None (native Rust) |
 //! | SparseLU-BTF | (always) | O(nnz·fill), block-optimized | None (native Rust) |
+//! | BBD    | (always) | O(nnz·fill), Schur complement | None (native Rust) |
 //! | Faer   | `faer-solver` (default) | O(nnz·fill) | Pure Rust |
 //! | KLU    | `klu` | O(nnz·fill), fastest | SuiteSparse (C) |
 //!
@@ -125,6 +126,8 @@ pub enum SolverType {
     SparseLu,
     /// Native Rust sparse LU solver with BTF decomposition - best for block-structured matrices
     SparseLuBtf,
+    /// BBD (Bordered Block Diagonal) solver - graph partitioning + Schur complement
+    Bbd,
     /// Faer sparse solver - Pure Rust, O(nnz·fill)
     Faer,
     /// KLU sparse solver - SuiteSparse C library, fastest
@@ -161,6 +164,7 @@ pub fn create_solver(solver_type: SolverType, n: usize) -> Box<dyn LinearSolver>
         SolverType::Dense => Box::new(DenseSolver::new(n)),
         SolverType::SparseLu => Box::new(crate::sparse_lu::SparseLuSolver::new(n)),
         SolverType::SparseLuBtf => Box::new(crate::sparse_lu_btf::SparseLuBtfSolver::new(n)),
+        SolverType::Bbd => Box::new(create_bbd_solver(n, 4)),
         SolverType::Faer => {
             #[cfg(feature = "faer-solver")]
             {
@@ -475,6 +479,16 @@ impl SolverSelector {
                     ),
                     properties,
                 }
+            } else if n >= 200 && density < 0.15 {
+                // Large sparse matrix without BTF block structure - try BBD
+                Self {
+                    properties,
+                    selected: SolverType::Bbd,
+                    reason: format!(
+                        "Large sparse matrix (n={}, {:.1}% fill) - BBD partitioning",
+                        n, density * 100.0
+                    ),
+                }
             } else if n > 500 {
                 // Large matrix without clear block structure - try BTF anyway
                 Self {
@@ -537,6 +551,19 @@ pub fn create_solver_for_matrix(n: usize, ap: &[i64], ai: &[i64]) -> Box<dyn Lin
 pub fn create_solver_for_matrix_quick(n: usize, ap: &[i64], ai: &[i64]) -> Box<dyn LinearSolver> {
     let selector = SolverSelector::select_quick(n, ap, ai);
     selector.create_solver()
+}
+
+/// Create a BBD (Bordered Block Diagonal) solver
+///
+/// # Arguments
+/// * `n` - Matrix dimension
+/// * `num_blocks` - Target number of diagonal blocks for partitioning
+pub fn create_bbd_solver(n: usize, num_blocks: usize) -> crate::bbd_solver::BbdSolver {
+    crate::bbd_solver::BbdSolver::new(
+        n,
+        Box::new(crate::bbd::GreedyBisectionPartitioner::new()),
+        num_blocks,
+    )
 }
 
 /// Get a description of the solver that would be selected by create_solver_auto

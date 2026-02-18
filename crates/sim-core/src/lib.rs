@@ -6,6 +6,8 @@ pub mod sparse_lu;
 pub mod sparse_lu_btf;
 pub mod btf;
 pub mod amd;
+pub mod bbd;
+pub mod bbd_solver;
 pub mod session;
 pub mod result_store;
 pub mod circuit;
