@@ -199,6 +199,154 @@ The `VaCompiler` handles transparent compilation with content-based caching:
 
 Caching means that repeated simulations of the same model incur no compilation cost. The cache is invalidated automatically when the `.va` source changes.
 
+### How Verilog-A is Compiled into a Loadable Library
+
+This section explains the full journey from Verilog-A behavioral source code to native machine code that RustSpice can `dlopen` and call at simulation time.
+
+#### What OpenVAF Does
+
+OpenVAF is a Verilog-A compiler written in Rust with an LLVM 15 backend. When RustSpice invokes it as a subprocess, OpenVAF performs these steps internally:
+
+1. **Parse** the Verilog-A source -- behavioral equations like `V(p,n) <+ R * I(p,n)` are parsed into an AST
+2. **Semantic analysis** -- resolve node contributions, parameter references, analog operators (`ddt`, `idt`, `limexp`, etc.)
+3. **Automatic differentiation** -- compute the Jacobian (partial derivatives of each branch contribution with respect to each node voltage). This is the key step: the Verilog-A author writes only the device equations, and OpenVAF automatically generates the derivative code needed for Newton-Raphson convergence
+4. **LLVM IR generation** -- emit LLVM intermediate representation for the `eval()` function (device equations + Jacobians), `setup_model()`, `setup_instance()`, and all other OSDI-mandated functions
+5. **Native code emission** -- LLVM compiles the IR to platform-native machine code and links it into a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows)
+
+The output `.osdi` file is a standard native shared library (e.g., an ELF `.so`) that happens to export symbols conforming to the OSDI 0.3 specification.
+
+#### The OSDI Shared Library Contract
+
+Every `.osdi` file must export exactly four symbols. These are what RustSpice looks for when loading the library:
+
+```
+OSDI_VERSION_MAJOR    : u32                    = 0
+OSDI_VERSION_MINOR    : u32                    = 3
+OSDI_NUM_DESCRIPTORS  : u32                    = N  (number of modules)
+OSDI_DESCRIPTORS      : [OsdiDescriptor; N]    = array of module descriptors
+```
+
+Each `OsdiDescriptor` is a large `#[repr(C)]` struct (defined in `osdi_types.rs`) that describes everything about one Verilog-A module:
+
+**Metadata fields:**
+- `name` -- module name (e.g., `"ekv"`, `"psp103"`)
+- `num_nodes`, `num_terminals` -- total nodes and external terminal count
+- `nodes` -- array of `OsdiNode` with name, units, and data offsets for residuals
+- `num_jacobian_entries`, `jacobian_entries` -- sparsity pattern as `(row_node, col_node)` pairs
+- `param_opvar` -- array of parameter descriptors with names, aliases, types, flags
+- `model_size`, `instance_size` -- byte sizes for opaque data blobs that the simulator must allocate
+
+**14 function pointers** (the compiled device equations):
+
+| Function | Signature | Purpose |
+|----------|-----------|---------|
+| `access` | `(inst, model, param_id, flags) -> *mut` | Read/write parameter values |
+| `setup_model` | `(handle, model, sim_params, result)` | Initialize model data, validate params |
+| `setup_instance` | `(handle, inst, model, temp, n_terms, sim_params, result)` | Initialize instance, node collapsing |
+| `eval` | `(handle, inst, model, sim_info) -> flags` | Evaluate device equations |
+| `load_residual_resist` | `(inst, model, dst)` | Extract resistive residuals |
+| `load_residual_react` | `(inst, model, dst)` | Extract reactive residuals |
+| `load_jacobian_resist` | `(inst, model)` | Load G (conductance) Jacobian entries |
+| `load_jacobian_react` | `(inst, model, alpha)` | Load C (capacitance) entries scaled by alpha |
+| `load_jacobian_tran` | `(inst, model, alpha)` | Load combined G + alpha*C entries |
+| `load_spice_rhs_dc` | `(inst, model, dst, prev_solve)` | Compute Newton RHS: J*x - f(x) |
+| `load_spice_rhs_tran` | `(inst, model, dst, prev_solve, alpha)` | Transient Newton RHS |
+| `load_noise` | `(inst, model, freq, noise_dens)` | Noise density evaluation |
+| `load_limit_rhs_resist` | `(inst, model, dst)` | Limiting RHS (resistive) |
+| `load_limit_rhs_react` | `(inst, model, dst)` | Limiting RHS (reactive) |
+
+The `eval()` function is the core: it takes node voltages, evaluates the Verilog-A behavioral equations, and writes residuals and Jacobian values into the opaque `instance_data` blob. The `load_*` functions then extract those values from `instance_data` into simulator-accessible arrays.
+
+#### How RustSpice Loads the Library
+
+`OsdiLibrary::load()` in `osdi_loader.rs` performs the loading sequence:
+
+```rust
+// Step 1: dlopen -- load the shared library into the process address space
+let lib = unsafe { Library::new(path) }?;       // libloading wraps dlopen()
+
+// Step 2: dlsym -- resolve the four mandatory symbols
+let version_major: u32 = **lib.get(b"OSDI_VERSION_MAJOR\0")?;
+let version_minor: u32 = **lib.get(b"OSDI_VERSION_MINOR\0")?;
+let num: u32           = **lib.get(b"OSDI_NUM_DESCRIPTORS\0")?;
+let raw: &[OsdiDescriptor] = slice::from_raw_parts(
+    *lib.get(b"OSDI_DESCRIPTORS\0")?, num as usize
+);
+
+// Step 3: Version check
+if version_major != 0 { return Err(VersionMismatch); }
+
+// Step 4: Parse raw C descriptors into safe Rust types
+let descriptors: Vec<SafeDescriptor> = raw.iter()
+    .map(|desc| SafeDescriptor::from_raw(desc as *const OsdiDescriptor))
+    .collect::<Result<Vec<_>, _>>()?;
+```
+
+`SafeDescriptor::from_raw()` walks all C pointers in the descriptor and copies them into owned Rust types:
+- `*const c_char` name pointers become `String`
+- `*const OsdiNode` arrays become `Vec<String>` node names + `Vec<u32>` offsets
+- `*const OsdiJacobianEntry` arrays become `Vec<JacobianEntryInfo>` with `(row_node, col_node)` pairs
+- `*const OsdiParamOpvar` arrays become `Vec<ParamInfo>` with name, aliases, description, units, flags
+
+After parsing, all string data is owned by Rust. The raw `*const OsdiDescriptor` pointer is retained for calling the function pointers during simulation.
+
+The `Library` handle is stored as `_lib` in `OsdiLibrary` and must stay alive for the entire simulation -- if it is dropped, all function pointers derived from it become dangling.
+
+#### How Loaded Models Are Used at Runtime
+
+Once the library is loaded, the engine creates model and instance wrappers:
+
+**OsdiModel** (shared across all instances of the same `.model`):
+```rust
+// 1. Allocate an opaque byte buffer for model-level data
+let model_data: Vec<u8> = vec![0u8; descriptor.model_size];
+
+// 2. Set .model parameters (e.g., vto=0.5, kp=2e-5) via the access() function pointer
+let ptr = access(null, model_data, param_index, ACCESS_FLAG_SET);
+*(ptr as *mut f64) = param_value;
+
+// 3. Call setup_model() to initialize derived quantities
+setup_model(handle, model_data, sim_params, &mut init_info);
+```
+
+**OsdiInstance** (one per device in the netlist):
+```rust
+// 1. Allocate an opaque byte buffer for instance-level data
+let instance_data: Vec<u8> = vec![0u8; descriptor.instance_size];
+
+// 2. Build node mapping: OSDI node index -> MNA matrix row/column
+//    Terminal nodes map to netlist node IDs
+//    Internal nodes get fresh auxiliary variable indices
+node_mapping[0] = mna_index_of_drain;   // terminal
+node_mapping[1] = mna_index_of_gate;    // terminal
+node_mapping[4] = aux_alloc("internal"); // internal node
+
+// 3. Set instance parameters (W=10u, L=1u) via access()
+// 4. Call setup_instance() to initialize
+setup_instance(handle, inst_data, model_data, temperature, ...);
+```
+
+**During Newton-Raphson iteration:**
+```
+eval(inst_data, model_data, voltages, temp, flags)
+    -> writes residuals and Jacobian values into inst_data
+
+load_jacobian_resist(inst_data, model_data)
+    -> extracts Jacobian entries from inst_data into readable locations
+
+for each Jacobian entry (row, col):
+    value = read_jacobian_resist(k)
+    mna_matrix[row_mna][col_mna] += value
+
+load_spice_rhs_dc(inst_data, model_data, rhs_buf, prev_solve)
+    -> computes J*x - f(x) in OSDI's format
+
+for each mapped node:
+    rhs_vector[mna_idx] += rhs_buf[mna_idx]
+```
+
+This is pure compiled native code at simulation time -- no interpretation, no JIT. The Verilog-A behavioral equations have been compiled down to optimized machine instructions by LLVM, and RustSpice calls them through C function pointers via FFI.
+
 ### OSDI Interface
 
 The OSDI (Open Source Device Interface) v0.3 standard defines a C ABI for compiled Verilog-A models. Each `.osdi` shared library exports:
