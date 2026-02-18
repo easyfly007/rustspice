@@ -11,12 +11,18 @@ num-complex = "0.4"
 # Pure Rust sparse linear algebra (optional, alternative to KLU)
 faer = { version = "0.20", optional = true }
 
+# Verilog-A OSDI support (optional)
+sim-va = { path = "../sim-va", optional = true }
+
 [features]
 # KLU sparse solver (requires SuiteSparse installation)
 klu = []
 
 # Faer sparse solver (pure Rust, no external dependencies)
 faer-solver = ["dep:faer"]
+
+# Verilog-A device model support via OSDI
+va = ["dep:sim-va"]
 
 # Default: use faer for easy setup (no C dependencies)
 default = ["faer-solver"]

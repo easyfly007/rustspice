@@ -82,6 +82,10 @@ pub enum ControlKind {
     Ac,
     Ic,
     End,
+    /// .hdl "path/to/model.va" - Verilog-A source file
+    Hdl,
+    /// .osdi "path/to/model.osdi" - Pre-compiled OSDI library
+    Osdi,
     Other,
 }
 
@@ -99,6 +103,8 @@ pub enum DeviceKind {
     F,
     H,
     X,
+    /// Verilog-A device (module name resolved during build_circuit)
+    VA { module_name: String },
     Unknown,
 }
 
@@ -505,6 +511,16 @@ fn split_device_fields(
                 nodes.extend_from_slice(args);
             }
         }
+        DeviceKind::VA { .. } => {
+            // VA devices: all args are node names except the last which is model
+            // Similar to X (subcircuit) handling
+            if args.len() >= 2 {
+                nodes.extend_from_slice(&args[0..args.len() - 1]);
+                model = Some(args[args.len() - 1].clone());
+            } else {
+                nodes.extend_from_slice(args);
+            }
+        }
         DeviceKind::Unknown => {
             nodes.extend_from_slice(args);
         }
@@ -555,6 +571,8 @@ fn map_control_kind(command: &str) -> ControlKind {
         ".ac" => ControlKind::Ac,
         ".ic" => ControlKind::Ic,
         ".end" => ControlKind::End,
+        ".hdl" => ControlKind::Hdl,
+        ".osdi" => ControlKind::Osdi,
         _ => ControlKind::Other,
     }
 }
@@ -821,6 +839,15 @@ fn validate_device_fields(
                 });
             }
         }
+        DeviceKind::VA { .. } => {
+            // VA devices: need at least 1 node and a model reference
+            if model.is_none() {
+                errors.push(ParseError {
+                    line: line_no,
+                    message: format!("{} missing model name {}", name, format_fields(nodes, model, control, value, extras, poly)),
+                });
+            }
+        }
         DeviceKind::Unknown => {}
     }
 }
@@ -1011,6 +1038,14 @@ pub fn build_circuit(ast: &NetlistAst, elab: &ElaboratedNetlist) -> crate::circu
                         }
                     }
                 }
+                ControlKind::Hdl | ControlKind::Osdi => {
+                    // .hdl "path/to/model.va" or .osdi "path/to/model.osdi"
+                    // Extract the file path from args (strip quotes if present)
+                    if let Some(raw_path) = ctrl.args.first() {
+                        let path_str = raw_path.trim_matches('"').trim_matches('\'');
+                        circuit.va_files.push(std::path::PathBuf::from(path_str));
+                    }
+                }
                 _ => {}
             }
         }
@@ -1047,6 +1082,9 @@ pub fn build_circuit(ast: &NetlistAst, elab: &ElaboratedNetlist) -> crate::circu
             DeviceKind::F => Some(CircuitDeviceKind::F),
             DeviceKind::H => Some(CircuitDeviceKind::H),
             DeviceKind::X => Some(CircuitDeviceKind::X),
+            DeviceKind::VA { ref module_name } => Some(CircuitDeviceKind::VA {
+                module_name: module_name.clone(),
+            }),
             DeviceKind::Unknown => None,
         };
         let Some(kind) = kind else {

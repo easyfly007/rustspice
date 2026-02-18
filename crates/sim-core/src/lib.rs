@@ -20,3 +20,5 @@ pub mod csv_export;
 pub mod complex_mna;
 pub mod complex_solver;
 pub mod waveform;
+#[cfg(feature = "va")]
+pub mod va_stamp;

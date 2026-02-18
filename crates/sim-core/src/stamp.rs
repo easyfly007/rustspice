@@ -140,6 +140,7 @@ impl DeviceStamp for InstanceStamp {
             DeviceKind::F => stamp_cccs(ctx, &self.instance, x),
             DeviceKind::H => stamp_ccvs(ctx, &self.instance, x),
             DeviceKind::X => Ok(()), // Subcircuit instances are already expanded
+            DeviceKind::VA { .. } => Ok(()), // VA devices are stamped by the engine via OsdiInstance
         }
     }
 
@@ -233,6 +234,7 @@ impl DeviceStamp for InstanceStamp {
             DeviceKind::F => stamp_cccs_ac(ctx, &self.instance, dc_solution),
             DeviceKind::H => stamp_ccvs_ac(ctx, &self.instance, dc_solution),
             DeviceKind::X => Ok(()), // Subcircuit instances are already expanded
+            DeviceKind::VA { .. } => Ok(()), // VA devices are stamped by the engine via OsdiInstance
         }
     }
 }

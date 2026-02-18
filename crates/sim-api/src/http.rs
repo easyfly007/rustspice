@@ -327,6 +327,7 @@ async fn get_devices(State(state): State<ApiState>) -> Result<Json<DevicesRespon
                 DeviceKind::F => "cccs",
                 DeviceKind::H => "ccvs",
                 DeviceKind::X => "subcircuit",
+                DeviceKind::VA { ref module_name } => module_name.as_str(),
             };
             // Convert NodeId to node names
             let node_names: Vec<String> = inst

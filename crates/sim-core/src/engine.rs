@@ -17,10 +17,26 @@ use crate::waveform::{
 };
 use num_complex::Complex64;
 
+#[cfg(feature = "va")]
+use std::collections::HashMap;
+#[cfg(feature = "va")]
+use std::sync::Arc;
+#[cfg(feature = "va")]
+use crate::va_stamp::{va_stamp_dc, va_stamp_tran, va_stamp_ac};
+
 pub struct Engine {
     pub circuit: Circuit,
     solver: Box<dyn LinearSolver>,
     solver_type: SolverType,
+    /// VA/OSDI device instances, keyed by circuit instance name.
+    #[cfg(feature = "va")]
+    va_instances: HashMap<String, sim_va::OsdiInstance>,
+    /// Loaded OSDI libraries (kept alive for the lifetime of the engine).
+    #[cfg(feature = "va")]
+    va_libraries: Vec<Arc<sim_va::OsdiLibrary>>,
+    /// Shared RHS buffer for VA stamping (avoids re-allocation per Newton step).
+    #[cfg(feature = "va")]
+    va_rhs_buf: Vec<f64>,
 }
 
 impl Engine {
@@ -31,12 +47,134 @@ impl Engine {
             circuit,
             solver: create_solver(solver_type, node_count),
             solver_type,
+            #[cfg(feature = "va")]
+            va_instances: HashMap::new(),
+            #[cfg(feature = "va")]
+            va_libraries: Vec::new(),
+            #[cfg(feature = "va")]
+            va_rhs_buf: Vec::new(),
         }
     }
 
     /// Create an Engine with the default solver (Dense).
     pub fn new_default(circuit: Circuit) -> Self {
         Self::new(circuit, SolverType::default())
+    }
+
+    /// Initialize VA/OSDI devices from the circuit's `.va_files`.
+    ///
+    /// This compiles `.va` files (via OpenVAF), loads the resulting `.osdi`
+    /// shared libraries, creates `OsdiModel` and `OsdiInstance` wrappers,
+    /// and stores them for use during simulation.
+    ///
+    /// Call this after constructing the Engine and before running analyses
+    /// if the circuit uses Verilog-A devices.
+    #[cfg(feature = "va")]
+    pub fn init_va_devices(&mut self) -> Result<(), String> {
+        use sim_va::{VaCompiler, OsdiLibrary, OsdiModel, OsdiInstance};
+
+        if self.circuit.va_files.is_empty() {
+            return Ok(());
+        }
+
+        let compiler = VaCompiler::new();
+
+        // 1. Compile .va files and load .osdi libraries
+        for va_path in &self.circuit.va_files {
+            let osdi_path = compiler
+                .compile_or_passthrough(va_path)
+                .map_err(|e| e.to_string())?;
+            let lib = Arc::new(OsdiLibrary::load(&osdi_path).map_err(|e| e.to_string())?);
+            self.va_libraries.push(lib);
+        }
+
+        // 2. Build module lookup: module_name → library
+        let mut module_lookup: HashMap<String, Arc<OsdiLibrary>> = HashMap::new();
+        for lib in &self.va_libraries {
+            for desc in &lib.descriptors {
+                module_lookup.insert(desc.name.to_ascii_lowercase(), lib.clone());
+            }
+        }
+
+        // 3. Create OsdiModel + OsdiInstance for each VA device instance
+        // First, group instances by model to share OsdiModel objects
+        let mut model_cache: HashMap<String, Arc<OsdiModel>> = HashMap::new();
+
+        for inst in &self.circuit.instances.instances {
+            let module_name = match &inst.kind {
+                DeviceKind::VA { module_name } => module_name.to_ascii_lowercase(),
+                _ => continue,
+            };
+
+            let library = match module_lookup.get(&module_name) {
+                Some(lib) => lib.clone(),
+                None => {
+                    return Err(format!(
+                        "VA module '{}' not found in loaded OSDI libraries",
+                        module_name
+                    ));
+                }
+            };
+
+            // Get or create OsdiModel for this model
+            let model_key = match &inst.model {
+                Some(model_id) => {
+                    if let Some(model_def) = self.circuit.models.models.get(model_id.0) {
+                        model_def.name.clone()
+                    } else {
+                        module_name.clone()
+                    }
+                }
+                None => module_name.clone(),
+            };
+
+            let osdi_model = if let Some(model) = model_cache.get(&model_key) {
+                model.clone()
+            } else {
+                // Get model parameters
+                let model_params = match &inst.model {
+                    Some(model_id) => {
+                        if let Some(model_def) = self.circuit.models.models.get(model_id.0) {
+                            model_def.params.clone()
+                        } else {
+                            HashMap::new()
+                        }
+                    }
+                    None => HashMap::new(),
+                };
+
+                let model = Arc::new(
+                    OsdiModel::new(library, &module_name, &model_params)
+                        .map_err(|e| e.to_string())?,
+                );
+                model_cache.insert(model_key, model.clone());
+                model
+            };
+
+            // Map terminal node IDs (from circuit NodeId to MNA index)
+            let terminal_ids: Vec<usize> = inst.nodes.iter().map(|n| n.0).collect();
+
+            // Create instance with aux allocator for internal nodes
+            let node_count = self.circuit.nodes.id_to_name.len();
+            let osdi_inst = OsdiInstance::new(
+                osdi_model,
+                &inst.name,
+                &terminal_ids,
+                |_name| {
+                    // Internal nodes will be allocated during stamping
+                    // For now, we don't support internal nodes in VA devices
+                    // TODO: integrate with MNA auxiliary variable allocation
+                    node_count
+                },
+                &inst.params,
+                27.0 + 273.15, // Default temperature: 300.15K (27°C)
+            )
+            .map_err(|e| e.to_string())?;
+
+            self.va_instances.insert(inst.name.clone(), osdi_inst);
+        }
+
+        Ok(())
     }
 
     /// Reinitialize the solver when the circuit size changes.
@@ -105,6 +243,13 @@ impl Engine {
         let mut x = vec![0.0; node_count];
         self.solver.prepare(node_count);
         let gnd = self.circuit.nodes.gnd_id.0;
+
+        // Borrow VA state outside the closure to avoid borrow conflicts
+        #[cfg(feature = "va")]
+        let va_instances = &mut self.va_instances;
+        #[cfg(feature = "va")]
+        let va_rhs_buf = &mut self.va_rhs_buf;
+
         let result = run_newton_with_stepping(&config, &mut x, |x, gmin, source_scale| {
             let mut mna = MnaBuilder::new(node_count);
             for inst in &self.circuit.instances.instances {
@@ -114,6 +259,14 @@ impl Engine {
                 let mut ctx = mna.context_with(gmin, source_scale);
                 let _ = stamp.stamp_dc(&mut ctx, Some(x));
             }
+
+            // Stamp VA devices
+            #[cfg(feature = "va")]
+            for (_name, va_inst) in va_instances.iter_mut() {
+                let mut ctx = mna.context_with(gmin, source_scale);
+                let _ = va_stamp_dc(va_inst, &mut ctx, Some(x), va_rhs_buf);
+            }
+
             // Pin the ground node to avoid a singular matrix.
             mna.builder.insert(gnd, gnd, 1.0);
             let (ap, ai, ax) = mna.builder.finalize();
@@ -239,6 +392,12 @@ impl Engine {
         let mut tran_times: Vec<f64> = Vec::new();
         let mut tran_solutions: Vec<Vec<f64>> = Vec::new();
 
+        // Borrow VA state outside closures
+        #[cfg(feature = "va")]
+        let va_instances = &mut self.va_instances;
+        #[cfg(feature = "va")]
+        let va_rhs_buf = &mut self.va_rhs_buf;
+
         // ====================================================================
         // Run initial DC operating point (t=tstart)
         // ====================================================================
@@ -248,6 +407,11 @@ impl Engine {
                 let stamp = InstanceStamp { instance: inst.clone() };
                 let mut ctx = mna.context_with(gmin, source_scale);
                 let _ = stamp.stamp_dc(&mut ctx, Some(x));
+            }
+            #[cfg(feature = "va")]
+            for (_name, va_inst) in va_instances.iter_mut() {
+                let mut ctx = mna.context_with(gmin, source_scale);
+                let _ = va_stamp_dc(va_inst, &mut ctx, Some(x), va_rhs_buf);
             }
             mna.builder.insert(gnd, gnd, 1.0);
             let (ap, ai, ax) = mna.builder.finalize();
@@ -306,6 +470,8 @@ impl Engine {
             // Step 3: Solve with Backward Euler (for LTE estimation)
             let mut x_be = x.clone();
             state_be.method = IntegrationMethod::BackwardEuler;
+            #[cfg(feature = "va")]
+            let alpha_be = 1.0 / dt;
             let result_be = run_newton_with_stepping(&NewtonConfig::default(), &mut x_be, |x_iter, gmin, source_scale| {
                 let mut mna = MnaBuilder::new(node_count);
                 for inst in &self.circuit.instances.instances {
@@ -313,6 +479,11 @@ impl Engine {
                     let mut ctx = mna.context_with(gmin, source_scale);
                     // Use stamp_tran_at_time to evaluate time-varying sources at t_target
                     let _ = stamp.stamp_tran_at_time(&mut ctx, Some(x_iter), t_target, dt, &mut state_be);
+                }
+                #[cfg(feature = "va")]
+                for (_name, va_inst) in va_instances.iter_mut() {
+                    let mut ctx = mna.context_with(gmin, source_scale);
+                    let _ = va_stamp_tran(va_inst, &mut ctx, Some(x_iter), alpha_be, va_rhs_buf);
                 }
                 mna.builder.insert(gnd, gnd, 1.0);
                 let (ap, ai, ax) = mna.builder.finalize();
@@ -334,6 +505,8 @@ impl Engine {
             // Step 4: Solve with Trapezoidal (primary method, higher accuracy)
             let mut x_trap = x.clone();
             state_trap.method = IntegrationMethod::Trapezoidal;
+            #[cfg(feature = "va")]
+            let alpha_trap = 2.0 / dt;
             let result_trap = run_newton_with_stepping(&NewtonConfig::default(), &mut x_trap, |x_iter, gmin, source_scale| {
                 let mut mna = MnaBuilder::new(node_count);
                 for inst in &self.circuit.instances.instances {
@@ -341,6 +514,11 @@ impl Engine {
                     let mut ctx = mna.context_with(gmin, source_scale);
                     // Use stamp_tran_at_time to evaluate time-varying sources at t_target
                     let _ = stamp.stamp_tran_at_time(&mut ctx, Some(x_iter), t_target, dt, &mut state_trap);
+                }
+                #[cfg(feature = "va")]
+                for (_name, va_inst) in va_instances.iter_mut() {
+                    let mut ctx = mna.context_with(gmin, source_scale);
+                    let _ = va_stamp_tran(va_inst, &mut ctx, Some(x_iter), alpha_trap, va_rhs_buf);
                 }
                 mna.builder.insert(gnd, gnd, 1.0);
                 let (ap, ai, ax) = mna.builder.finalize();
@@ -560,6 +738,12 @@ impl Engine {
         let mut x = vec![0.0; node_count];
         self.solver.prepare(node_count);
 
+        // Borrow VA state outside closures
+        #[cfg(feature = "va")]
+        let va_instances = &mut self.va_instances;
+        #[cfg(feature = "va")]
+        let va_rhs_buf = &mut self.va_rhs_buf;
+
         for &sweep_val in &sweep_values {
             // Update source value
             self.circuit.instances.instances[source_idx].value = Some(sweep_val.to_string());
@@ -573,6 +757,11 @@ impl Engine {
                     };
                     let mut ctx = mna.context_with(gmin, source_scale);
                     let _ = stamp.stamp_dc(&mut ctx, Some(x));
+                }
+                #[cfg(feature = "va")]
+                for (_name, va_inst) in va_instances.iter_mut() {
+                    let mut ctx = mna.context_with(gmin, source_scale);
+                    let _ = va_stamp_dc(va_inst, &mut ctx, Some(x), va_rhs_buf);
                 }
                 // Ground node constraint
                 mna.builder.insert(gnd, gnd, 1.0);
@@ -684,6 +873,13 @@ impl Engine {
                 };
                 let mut ctx = mna.context(omega);
                 let _ = stamp.stamp_ac(&mut ctx, &dc_solution);
+            }
+
+            // Stamp VA devices for AC
+            #[cfg(feature = "va")]
+            for (_name, va_inst) in self.va_instances.iter_mut() {
+                let mut ctx = mna.context(omega);
+                let _ = va_stamp_ac(va_inst, &mut ctx, &dc_solution);
             }
 
             // Fix ground node: clear the row and set diagonal to 1

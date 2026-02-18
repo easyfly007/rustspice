@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
@@ -96,6 +97,8 @@ pub enum DeviceKind {
     F,
     H,
     X,
+    /// Verilog-A device loaded via OSDI.
+    VA { module_name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +183,8 @@ pub struct Circuit {
     /// Initial conditions for transient analysis (.ic directive)
     /// Maps node ID to initial voltage
     pub initial_conditions: HashMap<NodeId, f64>,
+    /// Verilog-A / OSDI file paths from .hdl and .osdi directives
+    pub va_files: Vec<PathBuf>,
 }
 
 impl Circuit {
@@ -190,6 +195,7 @@ impl Circuit {
             instances: InstanceTable::new(),
             analysis: Vec::new(),
             initial_conditions: HashMap::new(),
+            va_files: Vec::new(),
         }
     }
 }
