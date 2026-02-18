@@ -4,13 +4,14 @@ This document provides comprehensive information about the linear solvers availa
 
 ## Overview
 
-RustSpice provides five linear solver backends for circuit simulation:
+RustSpice provides six linear solver backends for circuit simulation:
 
 | Solver | Feature Flag | Dependencies | Performance | Best For |
 |--------|--------------|--------------|-------------|----------|
 | **Dense** | (always available) | None | O(n³) | n < 100 nodes |
 | **SparseLU** | (always available) | None (native Rust) | O(nnz·fill) | 100-5000 nodes |
 | **SparseLU-BTF** | (always available) | None (native Rust) | O(nnz·fill), block-optimized | Block-structured circuits |
+| **BBD** | (always available) | None (native Rust) | O(nnz·fill), Schur complement | Large sparse, single-SCC circuits |
 | **Faer** | `faer-solver` (default) | Pure Rust | O(nnz·fill) | General use |
 | **KLU** | `klu` | SuiteSparse (C) | O(nnz·fill), fastest | Large circuits |
 
@@ -226,6 +227,68 @@ BTF is not used when:
 - The largest block equals the matrix size
 - Matrix is too small (< 10 nodes by default)
 - BTF would add overhead without benefit
+
+---
+
+### 4. BBD Solver (Bordered Block Diagonal)
+
+**Description:** Graph-partitioning based solver that decomposes the matrix into independent sub-blocks connected through a small border, then uses Schur complement reduction.
+
+**Complexity:**
+- Partitioning: O((n + nnz) · log₂(num_blocks))
+- Per-block factorization: O(nnz_block · fill_block)
+- Schur complement: O(bs² · Σ block_size) where bs = border size
+- Solve: O(nnz + bs²)
+- Memory: O(nnz + fill + bs²)
+
+**When to Use:**
+- Large circuits (n ≥ 200) where BTF finds only a single block
+- Sparse matrices (density < 15%) with shared GND/VDD networks
+- When KLU/Faer are not available and BTF is ineffective
+
+**How BBD Works:**
+
+BBD permutes the matrix to bordered block diagonal form:
+
+```
+┌──────┬──────┬──────┬────────┐
+│ B₁₁  │  0   │  0   │  C₁   │
+├──────┼──────┼──────┼────────┤
+│  0   │ B₂₂  │  0   │  C₂   │
+├──────┼──────┼──────┼────────┤
+│  0   │  0   │ B₃₃  │  C₃   │
+├──────┼──────┼──────┼────────┤
+│  R₁  │  R₂  │  R₃  │  B_T  │
+└──────┴──────┴──────┴────────┘
+```
+
+The solve uses Schur complement: S = B_T - Σ R_k · B_kk⁻¹ · C_k
+
+**Key Difference from BTF:** BTF relies on naturally occurring strongly connected components; BBD actively partitions the graph. Real SPICE circuits typically have one large SCC (shared GND/VDD), making BTF ineffective — BBD handles this case.
+
+**Features:**
+- Pluggable partitioning algorithms via `Partitioner` trait
+- Built-in BFS recursive bisection partitioner
+- Automatic fallback to SparseLU when partitioning is not beneficial
+- Dense Schur complement solver for the border system
+
+**Current Limitations:**
+- Dense Schur complement (O(bs³) for large borders)
+- No parallel sub-block processing yet
+- Partition quality limited compared to METIS
+
+See [BBD Solver Documentation](bbd_solver.md) for full details and TODO items.
+
+**Example:**
+```rust
+use sim_core::solver::{create_solver, SolverType, LinearSolver};
+
+let mut solver = create_solver(SolverType::Bbd, n);
+solver.prepare(n);
+solver.analyze(&ap, &ai)?;
+solver.factor(&ap, &ai, &ax)?;
+solver.solve(&mut rhs)?;
+```
 
 ---
 
@@ -614,7 +677,11 @@ The `SolverSelector` analyzes the following matrix properties:
                                                    /              \
                                                  Yes               No
                                                   |                 |
-                                          SparseLU-BTF         SparseLU
+                                          SparseLU-BTF    n ≥ 200 && sparse?
+                                                          /              \
+                                                        Yes               No
+                                                         |                 |
+                                                        BBD           SparseLU
 ```
 
 ### Usage
@@ -645,10 +712,13 @@ let solver = selector.create_solver();
 - [x] BTF (Block Triangular Form) decomposition for SparseLU
 - [x] Full AMD algorithm with quotient graph for SparseLU (see [AMD Algorithm](amd_algorithm.md))
 - [x] Automatic solver selection based on matrix properties
+- [x] BBD (Bordered Block Diagonal) solver with Schur complement (see [BBD Solver](bbd_solver.md))
+- [ ] BBD: sparse Schur complement for large borders
+- [ ] BBD: parallel sub-block factorization (rayon)
+- [ ] BBD: METIS partitioner integration
 - [ ] Iterative solvers (GMRES, BiCGSTAB) for very large circuits
 - [ ] GPU-accelerated solvers (cuSPARSE)
 - [ ] Parallel direct solvers (PARDISO, SuperLU_MT)
-- [ ] Automatic solver selection based on matrix properties
 - [ ] Matrix reordering visualization tools
 
 ---

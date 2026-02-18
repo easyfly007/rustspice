@@ -62,7 +62,13 @@ sim-core/src/
 ├── topology.rs      # 拓扑分析（占位）
 ├── mna.rs           # MNA 矩阵构建（SparseBuilder、AuxVarTable）
 ├── stamp.rs         # 器件 Stamp（DC/TRAN 模式）
-├── solver.rs        # 线性求解器（DenseSolver、KluSolver）
+├── solver.rs        # 线性求解器（DenseSolver、KluSolver、BBD 等）
+├── sparse_lu.rs     # 原生 Rust 稀疏 LU 分解
+├── sparse_lu_btf.rs # BTF 块三角集成稀疏 LU
+├── btf.rs           # 块三角形分解（SCC + 最大横截）
+├── amd.rs           # 近似最小度排序
+├── bbd.rs           # BBD 图分割与分解（Partitioner trait）
+├── bbd_solver.rs    # BBD 求解器（Schur 补方法）
 ├── newton.rs        # Newton 迭代（gmin/source stepping）
 ├── engine.rs        # 仿真引擎（DC、TRAN 分析）
 ├── analysis.rs      # 分析配置（时间步控制、误差估计）
@@ -79,7 +85,9 @@ sim-core/src/
 | `circuit.rs` | `Circuit`, `NodeTable`, `AnalysisCmd` | 电路中间表示 |
 | `mna.rs` | `MnaBuilder`, `SparseBuilder`, `AuxVarTable` | 构建 MNA 稀疏矩阵 |
 | `stamp.rs` | `DeviceStamp` trait, `InstanceStamp` | 各器件对矩阵的贡献 |
-| `solver.rs` | `LinearSolver` trait, `DenseSolver`, `KluSolver` | 线性方程组求解 |
+| `solver.rs` | `LinearSolver` trait, `DenseSolver`, `KluSolver` 等 | 线性方程组求解（6 种后端） |
+| `bbd.rs` | `Partitioner` trait, `BbdDecomposition` | BBD 图分割与矩阵分解 |
+| `bbd_solver.rs` | `BbdSolver` | BBD Schur 补求解器 |
 | `newton.rs` | `run_newton_with_stepping()` | 非线性迭代收敛 |
 | `engine.rs` | `Engine`, `run_dc_result()`, `run_tran_result()` | 执行 DC/TRAN 仿真 |
 | `result_store.rs` | `ResultStore`, `RunResult` | 管理仿真结果 |
@@ -169,7 +177,7 @@ pub trait DeviceStamp {
 | TRAN 仿真 | ✅ 完成 | 自适应步长、加权误差估计 |
 | AC 仿真 | ✅ 完成 | 小信号频域分析，支持 DEC/OCT/LIN 扫描 |
 | 器件模型 | ✅ 完成 | R/C/L/V/I/D/MOS 的 stamp 实现，BSIM3/BSIM4 完整支持 |
-| 求解器 | ✅ 完成 | DenseSolver 实现，KLU 接口可选，复数求解器 |
+| 求解器 | ✅ 完成 | Dense/SparseLU/SparseLU-BTF/BBD/Faer/KLU 六种后端，复数求解器 |
 | 结果输出 | ✅ 完成 | PSF 文本格式（含 DC/TRAN/AC 导出、精度控制） |
 | API 服务 | 🔄 最小可用 | 已支持 OP 运行与结果查询 |
 | CLI | ✅ 完成 | 完整帮助信息、版本、分析类型选择、PSF 导出、精度控制 |
