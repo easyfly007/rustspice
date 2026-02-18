@@ -479,6 +479,113 @@ error: module 'ekv' expects 4 terminals, got 3
 ```
 The device instance must provide the correct number of terminal nodes as declared by the Verilog-A module's port list.
 
+## Why OpenVAF: Compiler Comparison
+
+Several approaches exist for compiling Verilog-A compact models. This section compares all available options and explains why RustSpice chose OpenVAF.
+
+### Available Verilog-A Compilers
+
+#### OpenVAF
+
+[OpenVAF](https://openvaf.semimod.de/) is a next-generation Verilog-A compiler written in Rust with an LLVM 15 backend. It compiles `.va` source directly to native shared libraries (`.osdi`) conforming to the simulator-independent OSDI 0.3 standard.
+
+- **Approach**: Verilog-A source → LLVM IR → native shared library (`.osdi`)
+- **License**: GPL-3.0
+- **Compilation speed**: ~2 seconds for complex CMC models (e.g., PSP103)
+- **Code quality**: LLVM-optimized native code with auto-vectorization
+- **Verilog-A coverage**: Full LRM compliant; all public CMC models compile without modification
+- **Runtime loading**: `dlopen` at runtime, no recompilation of the simulator needed
+- **External dependencies**: None at runtime (LLVM is statically linked into the `openvaf` binary)
+- **Adopted by**: ngspice (since v39, replacing ADMS), SPICE OPUS, VACASK
+- **Maintenance**: Original author (Pascal Kuthe) is no longer active; community fork [OpenVAF-Reloaded](https://github.com/OpenVAF/OpenVAF-Reloaded) continues development
+
+#### ADMS (Legacy)
+
+[ADMS](https://github.com/Qucs/ADMS) (Automatic Device Model Synthesizer) is the traditional open-source Verilog-A translator. It reads Verilog-A and generates C/C++ source code through XML/XSLT templates, which must then be compiled by GCC and linked into the simulator.
+
+- **Approach**: Verilog-A source → XML AST → C/C++ source (via XSLT templates) → GCC → simulator plugin
+- **License**: GPL-3.0
+- **Compilation speed**: >60 seconds for complex models, plus additional GCC compilation time
+- **Code quality**: Unoptimized generated C code with many redundant operations
+- **Verilog-A coverage**: Partial; many models require manual `.va` modifications or hand-editing of generated C++
+- **Runtime loading**: Requires recompilation of the simulator or building a separate plugin `.so`
+- **External dependencies**: GCC or Clang required for the second compilation stage
+- **Adopted by**: ngspice (legacy, now replaced), Xyce, Qucs
+- **Maintenance**: Abandoned by original author, no active development
+
+#### Modelgen-Verilog (Gnucap)
+
+[Modelgen-Verilog](http://gnucap.org/dokuwiki/doku.php/gnucap:manual:modelgen-verilog) is a Verilog-AMS compiler under development for the Gnucap simulator. It generates C++ plugin source code specific to Gnucap's plugin architecture.
+
+- **Approach**: Verilog-AMS source → C++ source → GCC → Gnucap plugin `.so`
+- **License**: GPL-3.0 (part of the Gnucap project, NLnet funded)
+- **Compilation speed**: Not publicly benchmarked
+- **Code quality**: Early stage, described as "somewhat inefficient" generated code
+- **Verilog-A coverage**: Partial; supports most common analog constructs, still in active development
+- **Runtime loading**: Gnucap plugin system only
+- **Adopted by**: Gnucap only
+- **Maintenance**: Active development by Felix Salfelder with NLnet funding
+
+#### Commercial Built-in Compilers
+
+Commercial EDA tools include proprietary Verilog-A compilers tightly integrated into their simulators:
+
+- **Cadence Spectre**: Built-in Verilog-A compiler, full LRM compliance
+- **Synopsys HSPICE**: `hsp-vcomp` compiler, LRM 2.4 compliant
+- **Siemens/Mentor AFS**: Built-in Verilog-A support
+
+These compilers produce internal (non-portable) formats and are not available for use in third-party simulators.
+
+### Side-by-Side Comparison
+
+| Feature | OpenVAF | ADMS | Modelgen | Commercial |
+|---------|---------|------|----------|------------|
+| **License** | GPL-3.0 | GPL-3.0 | GPL-3.0 | Proprietary |
+| **Compilation output** | Native `.so` (OSDI) | C/C++ source | C++ source | Internal |
+| **Requires GCC/Clang** | No (LLVM built-in) | Yes | Yes | No |
+| **Simulator-independent** | Yes (OSDI standard) | No (per-simulator templates) | No (Gnucap only) | No |
+| **Runtime loading** | dlopen, no rebuild | Requires simulator rebuild | Requires Gnucap rebuild | Built-in |
+| **Compile speed** | ~2s | >60s + GCC | Unknown | Fast |
+| **Generated code quality** | LLVM optimized | Unoptimized C | Early stage | Best |
+| **CMC model compatibility** | All public models | Most (with patches) | Partial | All |
+| **Active maintenance** | Community fork | Abandoned | Active | Yes |
+| **Auto-differentiation** | Compiler-level AD | Template-based | Compiler-level | Compiler-level |
+| **Internal node support** | Full | Partial | Partial | Full |
+| **Noise analysis** | Supported in OSDI | Partial | Unknown | Full |
+
+### Why RustSpice Chose OpenVAF
+
+1. **Simulator-independent OSDI interface** -- OpenVAF is the only open-source compiler that produces a standardized binary interface. ADMS and Modelgen both generate simulator-specific C/C++ code requiring custom templates per simulator. With OSDI, RustSpice writes the loader once and it works with any compiled model.
+
+2. **No GCC dependency at runtime** -- ADMS generates C source that must be compiled by GCC/Clang as a second step. OpenVAF includes LLVM and produces the final `.so` directly. Users only need the single `openvaf` binary.
+
+3. **10x faster compilation** -- ~2 seconds vs >60 seconds for complex models like PSP103. This matters for model development iteration and first-time user experience.
+
+4. **Better simulation performance** -- LLVM optimization passes produce faster device evaluation code than ADMS's unoptimized C output. OpenVAF-compiled models run measurably faster in simulation loops.
+
+5. **Full CMC model support without patches** -- All public compact models (PSP, EKV, BSIM-CMG, HiSIM, MEXTRAM, etc.) compile without modification. ADMS often requires manual patching of `.va` files to work around parser limitations.
+
+6. **Industry momentum** -- ngspice, the most widely used open-source SPICE simulator, replaced ADMS with OpenVAF starting from version 39. OSDI/OpenVAF is now the de facto open-source standard for Verilog-A integration.
+
+7. **Subprocess isolation** -- As an external binary, OpenVAF keeps LLVM's ~200MB build dependency out of RustSpice's build process. The compilation cost is a one-time expense per model, and results are cached by content hash.
+
+### Licensing Considerations for Commercial Use
+
+OpenVAF is licensed under **GPL-3.0**. The impact on RustSpice depends on how OpenVAF is used:
+
+| Scenario | GPL Impact on RustSpice |
+|----------|------------------------|
+| Calling `openvaf` as a subprocess (our approach) | No copyleft obligation -- same as using GCC |
+| User installs OpenVAF separately | No obligation on RustSpice at all |
+| Bundling `openvaf` binary in a distribution | Must include GPL-3.0 notice and source offer for OpenVAF |
+| Linking `libopenvaf` as a library | Would trigger GPL -- RustSpice would need to be GPL |
+
+RustSpice invokes OpenVAF as an **external subprocess** (`openvaf model.va -o model.osdi`). Under GPL-3.0, using a program as a standalone tool via subprocess does not make the calling software a "derivative work." This is the same legal basis that allows commercial IDEs to invoke GCC without becoming GPL themselves.
+
+The `.osdi` output files produced by OpenVAF contain LLVM-generated machine code from the user's `.va` source, not OpenVAF code itself. Compiler output is generally not covered by the compiler's license (the "GCC exception" principle). Loading `.osdi` files at runtime carries no GPL obligation.
+
+**Maintenance risk**: OpenVAF's original author is no longer actively maintaining the project. The [community fork (OpenVAF-Reloaded)](https://github.com/OpenVAF/OpenVAF-Reloaded) has taken over. However, since the OSDI interface is stable and all major CMC models already compile correctly, this is a low practical risk -- the compiler is essentially feature-complete for the current generation of compact models.
+
 ## Limitations
 
 - **Internal nodes**: VA models with internal nodes require auxiliary MNA variable allocation. This is implemented but not yet fully tested with complex models.
