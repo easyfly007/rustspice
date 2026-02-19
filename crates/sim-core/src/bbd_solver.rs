@@ -82,6 +82,9 @@ impl SparseBlock {
     }
 }
 
+/// Border size threshold: use dense Schur for bs ≤ this, sparse for bs > this
+const DENSE_SCHUR_THRESHOLD: usize = 64;
+
 /// Dense Schur complement solver (for the border system S · x = b)
 #[derive(Debug)]
 struct DenseSchurSolver {
@@ -198,6 +201,29 @@ impl DenseSchurSolver {
     }
 }
 
+/// Schur complement solver — dispatches between dense and sparse implementations
+enum SchurSolver {
+    Dense(DenseSchurSolver),
+    Sparse {
+        solver: SparseLuSolver,
+        schur_ap: Vec<i64>,
+        schur_ai: Vec<i64>,
+        schur_ax: Vec<f64>,
+    },
+}
+
+impl std::fmt::Debug for SchurSolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchurSolver::Dense(d) => f.debug_tuple("Dense").field(d).finish(),
+            SchurSolver::Sparse { schur_ap, .. } => f
+                .debug_struct("Sparse")
+                .field("border_size", &(schur_ap.len().saturating_sub(1)))
+                .finish(),
+        }
+    }
+}
+
 /// BBD (Bordered Block Diagonal) linear solver.
 ///
 /// Uses graph partitioning to decompose the matrix into independent sub-blocks
@@ -219,14 +245,17 @@ pub struct BbdSolver {
     /// R_k has dimensions (block_k_size × border_size)
     r_blocks: Vec<SparseBlock>,
 
-    /// Dense Schur complement solver
-    schur_solver: DenseSchurSolver,
+    /// Schur complement solver (dense for small borders, sparse for large)
+    schur_solver: SchurSolver,
 
-    /// B_T values (border×border, dense, row-major)
+    /// B_T values (border×border, dense, row-major) — used only for dense path
     bt_dense: Vec<f64>,
 
-    /// Schur complement matrix (dense, row-major)
+    /// Schur complement matrix (dense, row-major) — used only for dense path
     schur_matrix: Vec<f64>,
+
+    /// Pre-allocated workspace for block solves (length = max block size)
+    block_work: Vec<f64>,
 
     /// Workspace
     work: Vec<f64>,
@@ -272,9 +301,10 @@ impl BbdSolver {
             block_solvers: Vec::new(),
             c_blocks: Vec::new(),
             r_blocks: Vec::new(),
-            schur_solver: DenseSchurSolver::new(0),
+            schur_solver: SchurSolver::Dense(DenseSchurSolver::new(0)),
             bt_dense: Vec::new(),
             schur_matrix: Vec::new(),
+            block_work: Vec::new(),
             work: vec![0.0; n],
             last_ap: Vec::new(),
             last_ai: Vec::new(),
@@ -288,6 +318,96 @@ impl BbdSolver {
     /// Check if pattern matches cached pattern
     fn pattern_matches(&self, ap: &[i64], ai: &[i64]) -> bool {
         self.last_ap == ap && self.last_ai == ai
+    }
+
+    /// Compute the sparsity pattern of the Schur complement S = B_T - Σ C_k · B_kk⁻¹ · R_k.
+    ///
+    /// S[i,j] is potentially non-zero iff:
+    /// - B_T[i,j] ≠ 0 (direct border-border coupling), OR
+    /// - ∃k where border row i has an entry in C_k AND border col j has an entry in R_k
+    ///
+    /// Returns (schur_ap, schur_ai) in CSC format.
+    fn compute_schur_pattern(
+        decomp: &BbdDecomposition,
+        c_blocks: &[SparseBlock],
+        r_blocks: &[SparseBlock],
+        ap: &[i64],
+        ai: &[i64],
+        n: usize,
+    ) -> (Vec<i64>, Vec<i64>) {
+        let bs = decomp.border_size;
+
+        // For each block k, collect which border rows appear in C_k
+        // c_border_rows[k] = set of border row indices that have entries in C_k
+        let mut c_border_rows: Vec<Vec<bool>> = Vec::with_capacity(decomp.num_blocks);
+        for k in 0..decomp.num_blocks {
+            let mut rows = vec![false; bs];
+            for &r in &c_blocks[k].row_idx {
+                rows[r] = true;
+            }
+            c_border_rows.push(rows);
+        }
+
+        // For each block k, collect which border cols have entries in R_k
+        // r_border_cols[k] = set of border col indices that have entries in R_k
+        let mut r_border_cols: Vec<Vec<bool>> = Vec::with_capacity(decomp.num_blocks);
+        for k in 0..decomp.num_blocks {
+            let mut cols = vec![false; bs];
+            for j in 0..bs {
+                if r_blocks[k].col_ptr[j] < r_blocks[k].col_ptr[j + 1] {
+                    cols[j] = true;
+                }
+            }
+            r_border_cols.push(cols);
+        }
+
+        // Build CSC column by column
+        let mut schur_ap = vec![0i64; bs + 1];
+        let mut schur_ai = Vec::new();
+        let mut marker = vec![false; bs]; // which rows are non-zero in current column
+
+        for j in 0..bs {
+            // Reset marker
+            marker.fill(false);
+
+            // Direct B_T entries in column j
+            let new_col = decomp.border_start + j;
+            let old_col = decomp.perm[new_col];
+            let col_start = ap[old_col] as usize;
+            let col_end = ap[old_col + 1] as usize;
+            for idx in col_start..col_end {
+                let old_row = ai[idx] as usize;
+                if old_row >= n {
+                    continue;
+                }
+                let new_row = decomp.inv_perm[old_row];
+                if new_row >= decomp.border_start {
+                    marker[new_row - decomp.border_start] = true;
+                }
+            }
+
+            // Fill from C_k · B_kk⁻¹ · R_k: if R_k has entries in col j,
+            // then all border rows that appear in C_k become potential non-zeros
+            for k in 0..decomp.num_blocks {
+                if r_border_cols[k][j] {
+                    for i in 0..bs {
+                        if c_border_rows[k][i] {
+                            marker[i] = true;
+                        }
+                    }
+                }
+            }
+
+            // Collect marked rows (sorted since we iterate in order)
+            for i in 0..bs {
+                if marker[i] {
+                    schur_ai.push(i as i64);
+                }
+            }
+            schur_ap[j + 1] = schur_ai.len() as i64;
+        }
+
+        (schur_ap, schur_ai)
     }
 
     /// Analyze: compute BBD decomposition and set up block structures
@@ -310,25 +430,63 @@ impl BbdSolver {
             return self.setup_fallback(ap, ai);
         }
 
-        // Set up block solvers
+        // Set up block solvers and compute max block size
         self.block_solvers.clear();
         self.block_solvers.reserve(decomp.num_blocks);
+        let mut max_blk_size = 0;
 
         for k in 0..decomp.num_blocks {
             let block_size = decomp.block_ptr[k + 1] - decomp.block_ptr[k];
+            max_blk_size = max_blk_size.max(block_size);
             let mut solver = SparseLuSolver::new(block_size);
             solver.prepare(block_size);
             self.block_solvers.push(solver);
         }
+
+        // Pre-allocate block workspace
+        self.block_work.resize(max_blk_size, 0.0);
 
         // Extract block patterns for symbolic analysis
         self.extract_block_patterns(&decomp, ap, ai)?;
 
         // Set up Schur complement solver
         let bs = decomp.border_size;
-        self.schur_solver.resize(bs);
-        self.bt_dense.resize(bs * bs, 0.0);
-        self.schur_matrix.resize(bs * bs, 0.0);
+        if bs <= DENSE_SCHUR_THRESHOLD {
+            // Small border — use dense Schur solver
+            let mut dense = DenseSchurSolver::new(bs);
+            dense.resize(bs);
+            self.schur_solver = SchurSolver::Dense(dense);
+            self.bt_dense.resize(bs * bs, 0.0);
+            self.schur_matrix.resize(bs * bs, 0.0);
+        } else {
+            // Large border — use sparse Schur solver
+            let (schur_ap, schur_ai) =
+                Self::compute_schur_pattern(&decomp, &self.c_blocks, &self.r_blocks, ap, ai, n);
+
+            let schur_nnz = schur_ai.len();
+            let schur_ax = vec![0.0; schur_nnz];
+
+            let mut solver = SparseLuSolver::new(bs);
+            solver.prepare(bs);
+            solver.analyze(&schur_ap, &schur_ai)?;
+
+            eprintln!(
+                "[BBD] Sparse Schur: border_size={}, schur_nnz={} ({:.1}% dense)",
+                bs,
+                schur_nnz,
+                100.0 * schur_nnz as f64 / (bs as f64 * bs as f64)
+            );
+
+            self.schur_solver = SchurSolver::Sparse {
+                solver,
+                schur_ap,
+                schur_ai,
+                schur_ax,
+            };
+            // Not needed for sparse path, but clear to avoid stale data
+            self.bt_dense.clear();
+            self.schur_matrix.clear();
+        }
 
         self.decomp = Some(decomp);
         self.fallback_solver = None;
@@ -575,81 +733,171 @@ impl BbdSolver {
             }
         }
 
-        // Extract B_T (border×border) as dense matrix
-        self.bt_dense.fill(0.0);
-        for local_col in 0..bs {
-            let new_col = decomp.border_start + local_col;
-            let old_col = decomp.perm[new_col];
+        // Compute and factor Schur complement: S = B_T - Σ C_k · B_kk⁻¹ · R_k
+        // Extract schur_solver to avoid borrow conflicts with block_solvers/c_blocks/r_blocks
+        let mut schur_solver = std::mem::replace(
+            &mut self.schur_solver,
+            SchurSolver::Dense(DenseSchurSolver::new(0)),
+        );
 
-            let col_start = ap[old_col] as usize;
-            let col_end = ap[old_col + 1] as usize;
+        match &mut schur_solver {
+            SchurSolver::Dense(dense_solver) => {
+                // --- Dense path (small border) ---
 
-            for idx in col_start..col_end {
-                let old_row = ai[idx] as usize;
-                if old_row >= n {
-                    continue;
+                // Extract B_T (border×border) as dense matrix
+                self.bt_dense.fill(0.0);
+                for local_col in 0..bs {
+                    let new_col = decomp.border_start + local_col;
+                    let old_col = decomp.perm[new_col];
+
+                    let col_start = ap[old_col] as usize;
+                    let col_end = ap[old_col + 1] as usize;
+
+                    for idx in col_start..col_end {
+                        let old_row = ai[idx] as usize;
+                        if old_row >= n {
+                            continue;
+                        }
+                        let new_row = decomp.inv_perm[old_row];
+
+                        if new_row >= decomp.border_start {
+                            let local_row = new_row - decomp.border_start;
+                            self.bt_dense[local_row * bs + local_col] += ax[idx];
+                        }
+                    }
                 }
-                let new_row = decomp.inv_perm[old_row];
 
-                if new_row >= decomp.border_start {
-                    let local_row = new_row - decomp.border_start;
-                    self.bt_dense[local_row * bs + local_col] += ax[idx];
+                // S = B_T, then accumulate S -= C_k · B_kk⁻¹ · R_k
+                self.schur_matrix.copy_from_slice(&self.bt_dense);
+
+                for k in 0..decomp.num_blocks {
+                    let blk_size = decomp.block_ptr[k + 1] - decomp.block_ptr[k];
+
+                    for j in 0..bs {
+                        let r_col_start = self.r_blocks[k].col_ptr[j];
+                        let r_col_end = self.r_blocks[k].col_ptr[j + 1];
+
+                        if r_col_start == r_col_end {
+                            continue;
+                        }
+
+                        // Use pre-allocated block_work instead of allocating
+                        let work = &mut self.block_work[..blk_size];
+                        work.fill(0.0);
+                        for idx in r_col_start..r_col_end {
+                            work[self.r_blocks[k].row_idx[idx]] = self.r_blocks[k].values[idx];
+                        }
+
+                        self.block_solvers[k].solve(work)?;
+
+                        for col in 0..blk_size {
+                            let y_val = work[col];
+                            if y_val == 0.0 {
+                                continue;
+                            }
+                            let c_start = self.c_blocks[k].col_ptr[col];
+                            let c_end = self.c_blocks[k].col_ptr[col + 1];
+                            for idx in c_start..c_end {
+                                let border_row = self.c_blocks[k].row_idx[idx];
+                                let c_val = self.c_blocks[k].values[idx];
+                                self.schur_matrix[border_row * bs + j] -= c_val * y_val;
+                            }
+                        }
+                    }
                 }
+
+                dense_solver.factor(&self.schur_matrix)?;
+            }
+            SchurSolver::Sparse {
+                solver,
+                schur_ap,
+                schur_ai,
+                schur_ax,
+            } => {
+                // --- Sparse path (large border) ---
+
+                // Zero schur_ax
+                schur_ax.fill(0.0);
+
+                // Scatter B_T values into schur_ax
+                for local_col in 0..bs {
+                    let new_col = decomp.border_start + local_col;
+                    let old_col = decomp.perm[new_col];
+
+                    let col_start = ap[old_col] as usize;
+                    let col_end = ap[old_col + 1] as usize;
+
+                    let s_col_start = schur_ap[local_col] as usize;
+                    let s_col_end = schur_ap[local_col + 1] as usize;
+                    let col_rows = &schur_ai[s_col_start..s_col_end];
+
+                    for idx in col_start..col_end {
+                        let old_row = ai[idx] as usize;
+                        if old_row >= n {
+                            continue;
+                        }
+                        let new_row = decomp.inv_perm[old_row];
+
+                        if new_row >= decomp.border_start {
+                            let local_row = (new_row - decomp.border_start) as i64;
+                            // Binary search to find position in schur_ai
+                            if let Ok(pos) = col_rows.binary_search(&local_row) {
+                                schur_ax[s_col_start + pos] += ax[idx];
+                            }
+                        }
+                    }
+                }
+
+                // Accumulate S -= C_k · B_kk⁻¹ · R_k for each block
+                for k in 0..decomp.num_blocks {
+                    let blk_size = decomp.block_ptr[k + 1] - decomp.block_ptr[k];
+
+                    for j in 0..bs {
+                        let r_col_start = self.r_blocks[k].col_ptr[j];
+                        let r_col_end = self.r_blocks[k].col_ptr[j + 1];
+
+                        if r_col_start == r_col_end {
+                            continue;
+                        }
+
+                        // Use pre-allocated block_work
+                        let work = &mut self.block_work[..blk_size];
+                        work.fill(0.0);
+                        for idx in r_col_start..r_col_end {
+                            work[self.r_blocks[k].row_idx[idx]] = self.r_blocks[k].values[idx];
+                        }
+
+                        self.block_solvers[k].solve(work)?;
+
+                        // Scatter -C_k · y into schur_ax
+                        let s_col_start = schur_ap[j] as usize;
+                        let s_col_end = schur_ap[j + 1] as usize;
+                        let col_rows = &schur_ai[s_col_start..s_col_end];
+
+                        for col in 0..blk_size {
+                            let y_val = work[col];
+                            if y_val == 0.0 {
+                                continue;
+                            }
+                            let c_start = self.c_blocks[k].col_ptr[col];
+                            let c_end = self.c_blocks[k].col_ptr[col + 1];
+                            for idx in c_start..c_end {
+                                let border_row = self.c_blocks[k].row_idx[idx] as i64;
+                                let c_val = self.c_blocks[k].values[idx];
+                                if let Ok(pos) = col_rows.binary_search(&border_row) {
+                                    schur_ax[s_col_start + pos] -= c_val * y_val;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                solver.factor(schur_ap, schur_ai, schur_ax)?;
             }
         }
 
-        // Compute Schur complement: S = B_T - Σ c_blocks[k] · B_kk⁻¹ · r_blocks[k]
-        //
-        // In our naming convention:
-        //   c_blocks[k]: (border_size × block_size) — entries at (border_row, block_col)
-        //   r_blocks[k]: (block_size × border_size) — entries at (block_row, border_col)
-        //
-        // For each column j of r_blocks[k] (j = 0..border_size-1):
-        //   r_j = r_blocks[k][:,j] ∈ R^{block_size}
-        //   Solve B_kk · y_j = r_j  → y_j ∈ R^{block_size}
-        //   S[:,j] -= c_blocks[k] · y_j  (result ∈ R^{border_size})
-        self.schur_matrix.copy_from_slice(&self.bt_dense);
-
-        for k in 0..decomp.num_blocks {
-            let blk_size = decomp.block_ptr[k + 1] - decomp.block_ptr[k];
-
-            for j in 0..bs {
-                // Extract column j of r_blocks[k]
-                let r_col_start = self.r_blocks[k].col_ptr[j];
-                let r_col_end = self.r_blocks[k].col_ptr[j + 1];
-
-                if r_col_start == r_col_end {
-                    continue; // No entries in this column
-                }
-
-                let mut r_j = vec![0.0; blk_size];
-                for idx in r_col_start..r_col_end {
-                    r_j[self.r_blocks[k].row_idx[idx]] = self.r_blocks[k].values[idx];
-                }
-
-                // Solve B_kk · y_j = r_j
-                self.block_solvers[k].solve(&mut r_j)?;
-
-                // S[:,j] -= c_blocks[k] · y_j
-                // c_blocks[k] is (border_size × block_size) in CSC with ncols=block_size
-                for col in 0..blk_size {
-                    let y_val = r_j[col];
-                    if y_val == 0.0 {
-                        continue;
-                    }
-                    let c_start = self.c_blocks[k].col_ptr[col];
-                    let c_end = self.c_blocks[k].col_ptr[col + 1];
-                    for idx in c_start..c_end {
-                        let border_row = self.c_blocks[k].row_idx[idx];
-                        let c_val = self.c_blocks[k].values[idx];
-                        self.schur_matrix[border_row * bs + j] -= c_val * y_val;
-                    }
-                }
-            }
-        }
-
-        // Factor the Schur complement
-        self.schur_solver.factor(&self.schur_matrix)?;
+        // Put schur_solver back
+        self.schur_solver = schur_solver;
 
         Ok(())
     }
@@ -691,7 +939,10 @@ impl BbdSolver {
         }
 
         // Step 4: Solve S · x_T = b'_T
-        self.schur_solver.solve(&mut b_border)?;
+        match &mut self.schur_solver {
+            SchurSolver::Dense(dense_solver) => dense_solver.solve(&mut b_border)?,
+            SchurSolver::Sparse { solver, .. } => solver.solve(&mut b_border)?,
+        }
 
         // Step 5: Back-substitute for each block:
         //   x_k = z_k - B_kk⁻¹ · r_blocks[k] · x_T
