@@ -8,3 +8,6 @@ __pycache__/
 
 # Tool logs
 aqtinstall.log
+
+# Swap files
+*.swp
