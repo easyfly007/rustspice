@@ -6,6 +6,8 @@
 
 Native KLU 求解器在**重分解**（refactorization）阶段支持列级并行。当矩阵稀疏模式不变、仅数值改变时（SPICE 中 Newton 迭代的常见情况），多个线程可以同时处理不同列的分解。
 
+实现采用**持久线程池**（persistent thread pool）：工作线程在首次并行分解时创建，之后在所有后续的 `factor()` 调用中复用，直到求解器被销毁。这消除了每次分解时创建/销毁 OS 线程的开销（约 70-100ms），使并行分解在较小矩阵（n > ~10K）上也能获得加速。
+
 **启用条件**（必须同时满足）：
 1. 编译时启用 `parallel` feature（`--features parallel`）
 2. `.option solver_parallel=N`，N ≥ 2
@@ -47,98 +49,173 @@ Rust 有两个特殊的 trait 来控制什么类型可以跨线程使用：
 error: `*mut f64` cannot be sent between threads safely
 ```
 
-## 3. 并行分解实现详解
+## 3. 持久线程池实现详解
 
-以下按 `factor_block_parallel()` 的代码结构逐段解释。
+以下按线程池的创建、工作分发、列处理逐段解释。
 
 > 源码位置：`crates/sim-core/src/native_klu.rs`
 
-### 3.1 共享缓冲区与 SendPtr 包装器
+### 3.1 线程池生命周期
+
+```
+NativeKluSolver::new()          thread_pool = None（尚未创建）
+        │
+        ▼
+第一次 factor() 调用            顺序分解，无线程池
+        │
+        ▼
+第二次 factor() 调用            若 parallel_threads >= 2 且块大小 >= 64：
+（同一稀疏模式 = 重分解）         └─ 惰性创建线程池（FactorThreadPool::new()）
+        │                        └─ 创建 N 个 OS 线程，进入 worker_loop 等待
+        ▼
+第 3, 4, 5... 次 factor()      复用同一个线程池，线程不重新创建
+        │                        └─ 只传递 WorkDescriptor，唤醒线程，等待完成
+        ▼
+NativeKluSolver::drop()         FactorThreadPool::drop()
+                                 └─ 设置 shutdown = true
+                                 └─ 唤醒所有线程
+                                 └─ join 所有线程（等待退出）
+```
+
+**关键点**：
+- **惰性创建**：线程池不在 `NativeKluSolver::new()` 时创建，而是等到第一次需要并行分解时才创建
+- **线程数变化**：如果用户在运行中改变了 `solver_parallel` 的值，旧的线程池会被 drop（join 所有线程），然后创建新的线程池
+- **顺序分解时的开销**：当走顺序分解路径时（首次分解、小块、parallel_threads < 2），工作线程在 condvar 上休眠，CPU 开销为零
+
+### 3.2 核心数据结构
+
+#### WorkDescriptor —— 每次分解的工作描述
 
 ```rust
-// 预分配共享输出缓冲区
-let mut l_values = vec![0.0f64; sym.l_row_idx.len()];
-let mut u_values = vec![0.0f64; sym.u_row_idx.len()];
-let mut u_diag = vec![0.0f64; n];
-
-// 获取裸指针
-let l_ptr = l_values.as_mut_ptr();
-let u_ptr = u_values.as_mut_ptr();
-let d_ptr = u_diag.as_mut_ptr();
-
-// 包装器，让裸指针可以跨线程传递
-struct SendPtr(*mut f64);
-unsafe impl Send for SendPtr {}
-unsafe impl Sync for SendPtr {}
+struct WorkDescriptor {
+    n: usize,                    // 矩阵维数
+    num_threads: usize,          // 线程数
+    // 符号因子的裸指针（只读）
+    col_perm_inv: *const usize,
+    col_perm: *const usize,
+    l_col_ptr: *const usize,     // L 矩阵列指针
+    // ... 更多只读指针 ...
+    // 输出缓冲区的裸指针（各列写入不重叠）
+    l_values: *mut f64,
+    u_values: *mut f64,
+    u_diag: *mut f64,
+    // 同步标志
+    ready: *const AtomicBool,
+}
+unsafe impl Send for WorkDescriptor {}
 ```
+
+`WorkDescriptor` 包含裸指针指向 `factor_block_parallel()` 栈上的数据。**安全论据**：主线程通过 condvar 阻塞直到所有工作线程完成，因此所有指针指向的数据在工作线程访问期间保证存活。
+
+#### SharedPoolState —— Mutex 保护的共享状态
+
+```rust
+struct SharedPoolState {
+    work: Option<WorkDescriptor>,  // 当前工作项（None = 空闲）
+    generation: u64,               // 每次 dispatch 递增
+    done_count: usize,             // 本轮已完成的工作线程数
+    num_workers: usize,            // 总工作线程数
+    shutdown: bool,                // 终止标志
+}
+```
+
+`generation` 计数器是核心同步机制：
+- 主线程递增 `generation` 并设置 `work = Some(desc)` 来分发工作
+- 工作线程比较自己上次看到的 generation 来检测新工作
+- `done_count == num_workers` 时主线程被唤醒
+
+#### FactorThreadPool —— 持有线程和共享状态
+
+```rust
+struct FactorThreadPool {
+    shared: Arc<(Mutex<SharedPoolState>, Condvar, Condvar)>,
+    //                                    wake_workers  wake_main
+    threads: Vec<Option<JoinHandle<()>>>,
+    num_threads: usize,
+}
+```
+
+使用两个 Condvar 分别用于：
+- `wake_workers`：主线程唤醒工作线程开始处理
+- `wake_main`：最后一个完成的工作线程唤醒主线程
+
+### 3.3 通信协议
+
+```
+主线程                               工作线程（持久存在）
+    │                                     │ (在 wake_workers condvar 上休眠)
+    ├─ lock mutex                         │
+    ├─ work = Some(descriptor)            │
+    ├─ generation += 1                    │
+    ├─ done_count = 0                     │
+    ├─ notify_all(wake_workers) ─────────→├─ 醒来，读取 WorkDescriptor
+    ├─ wait(wake_main) ←─ (阻塞)          ├─ 处理交错列
+    │                                     ├─ 自旋等待 ready[] 获取依赖
+    │                                     ├─ lock mutex, done_count += 1
+    │                                     ├─ 若是最后一个: notify(wake_main) ───→├─ 主线程醒来
+    │                                     ├─ 回到循环继续休眠                     ├─ work = None
+    │                                                                           ├─ 返回 NumericFactor
+```
+
+### 3.4 工作线程主循环
+
+每个工作线程在 `worker_loop()` 中无限循环：
+
+```rust
+loop {
+    // 1. 等待新工作或关闭信号（在 condvar 上休眠，CPU 开销为零）
+    let mut state = mutex.lock().unwrap();
+    loop {
+        if state.shutdown { return; }                     // 收到关闭信号，退出
+        if state.generation > last_generation {           // 有新工作
+            last_generation = state.generation;
+            desc_copy = /* 复制 WorkDescriptor */;
+            break;
+        }
+        state = wake_workers.wait(state).unwrap();        // 继续休眠
+    }
+
+    // 2. 调整持久工作区大小（首次分配后复用，不重新分配）
+    work_buf.resize(n, 0.0);
+
+    // 3. 处理属于自己的列（交错分配）
+    execute_columns(tid, &desc_copy, &mut work_buf);
+
+    // 4. 通知完成
+    state.done_count += 1;
+    if state.done_count == state.num_workers {
+        wake_main.notify_one();                           // 唤醒主线程
+    }
+}
+```
+
+**持久工作区**：每个工作线程拥有一个 `Vec<f64>` 工作缓冲区。它在线程的整个生命周期中复用 —— 首次分配后，后续调用只需 `resize`（通常不会重新分配，因为大小相同或已经足够大）。
+
+### 3.5 为什么使用 Mutex + Condvar 而不是 channel？
+
+对比：
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| **Mutex + Condvar** | 零分配分发（复制一个 WorkDescriptor 值）；精确控制唤醒时机 | 需要手动管理 generation 计数 |
+| `mpsc::channel` | API 更简单 | 每次 send 需要堆分配；无法广播给所有线程 |
+| `crossbeam` channel | 高性能 | 引入外部依赖 |
+
+选择 Mutex + Condvar 是因为：无外部依赖、零分配、一次 `notify_all` 即可唤醒所有工作线程。
+
+### 3.6 安全的共享缓冲区写入
 
 **问题**：多个线程需要同时写入 `l_values`、`u_values`、`u_diag`。在安全 Rust 中，同一时间只能有一个 `&mut` 指向这些 `Vec`，编译器不允许多线程共享可变引用。
 
-**解决方案**：使用裸指针 `*mut f64` 绕过借用检查，再用 `SendPtr` 包装器让指针可以跨线程传递。`unsafe impl Send/Sync` 是程序员向编译器做出的承诺："我保证这是安全的"。
+**解决方案**：在 `factor_block_parallel()` 栈上分配缓冲区，通过 `WorkDescriptor` 的裸指针传递给工作线程。`WorkDescriptor` 通过 `unsafe impl Send` 让裸指针可以跨线程传递。
 
 **安全论据**：
 - 每列写入的索引范围互不重叠（列 k 写 `l_col_ptr[k]..l_col_ptr[k+1]`）
 - 符号分解的结构保证这些范围不会重叠
 - 读取列 j 的数据之前，一定先通过原子操作等待 `ready[j]` 变为 true
+- 主线程通过 condvar 阻塞直到所有工作线程完成，保证缓冲区在工作线程访问期间存活
 
-### 3.2 `std::thread::scope` —— 作用域线程
-
-```rust
-thread::scope(|s| {
-    for tid in 0..num_threads {
-        let ready_ref = &ready;
-        let sym_ref = sym;
-        let l_s = &l_send;
-
-        s.spawn(move || {
-            // 线程体
-        });
-    }
-});  // <-- 在这里阻塞，直到所有线程结束
-```
-
-**作用**：创建真正的 OS 线程，且**保证**在 `scope` 返回之前所有线程都已退出。
-
-**为什么需要"作用域"线程？** 普通的 `std::thread::spawn` 要求所有捕获的数据必须是 `'static`（永久存活），因为编译器不知道线程什么时候结束。但作用域线程不同 —— 编译器知道 scope 结束时所有线程一定已退出，因此允许线程**借用**栈上的局部变量：
-
-```
-factor_block_parallel() 的栈帧
-├── l_values: Vec<f64>        ← 在 scope 结束前一直存活
-├── ready: Vec<AtomicBool>    ← 线程可以安全地引用它
-├── sym: &SymbolicFactor      ← 线程可以安全地引用它
-│
-└── thread::scope {
-        thread 0 ─→ 引用 &ready, &sym  ✓ 安全
-        thread 1 ─→ 引用 &ready, &sym  ✓ 安全
-        thread 2 ─→ 引用 &ready, &sym  ✓ 安全
-    }  ← 所有线程在此 join，之后 l_values 等才被释放
-```
-
-**对比 C/pthreads**：在 C 中需要手动 `pthread_create` + `pthread_join`，编译器无法检查你是否正确 join 了线程。Rust 把 join 的保证编码进了类型系统。
-
-**为什么不用 Rayon？** Rayon 使用协作式工作窃取调度。如果线程 A 自旋等待线程 B 的结果，但两者在同一个 Rayon worker 上，就会**死锁** —— 自旋的线程无法释放 worker 去处理其他任务。`std::thread::scope` 创建的是真正的 OS 线程，每个线程有独立的内核调度单元，自旋等待不会阻塞其他线程。
-
-### 3.3 `move` 闭包
-
-```rust
-s.spawn(move || {
-    let l_raw = l_s.0;
-    let u_raw = u_s.0;
-    let mut work = vec![0.0f64; n];
-    // ...
-});
-```
-
-`move` 关键字将闭包捕获的所有变量的所有权转移到闭包内部。这里实际被 move 的是：
-
-| 变量 | 类型 | 开销 |
-|------|------|------|
-| `ready_ref` | `&Vec<AtomicBool>`（共享引用） | 复制一个指针，8 字节 |
-| `sym_ref` | `&SymbolicFactor`（共享引用） | 复制一个指针，8 字节 |
-| `l_s`, `u_s`, `d_s` | `&SendPtr`（指针的引用） | 复制一个指针 |
-| `tid` | `usize` | 复制一个整数，8 字节 |
-
-Move 引用非常廉价 —— 只是复制指针值，不复制底层数据。
+**为什么不用 Rayon？** Rayon 使用协作式工作窃取调度。如果线程 A 自旋等待线程 B 的结果，但两者在同一个 Rayon worker 上，就会**死锁** —— 自旋的线程无法释放 worker 去处理其他任务。持久线程池创建的是真正的 OS 线程，每个线程有独立的内核调度单元，自旋等待不会阻塞其他线程。
 
 ### 3.4 交错列分配
 
@@ -233,29 +310,31 @@ unsafe { *l_raw.add(l_idx) = work[row] / diag; }
 ## 4. 线程间数据流
 
 ```
-                    共享数据（只读）               共享数据（原子）
-                 ┌─────────────────┐          ┌──────────────────┐
-                 │ sym (符号因子)   │          │ ready[0..n]      │
-                 │ ap, ai, ax      │          │ (AtomicBool)     │
-                 │ row_perm_inv    │          └──────────────────┘
-                 └─────────────────┘
-
-  线程 0                线程 1                线程 2
-  ┌──────────┐          ┌──────────┐          ┌──────────┐
-  │ work[0..n]│          │ work[0..n]│          │ work[0..n]│  ← 私有工作区
-  │（私有）    │          │（私有）    │          │（私有）    │
-  └──────────┘          └──────────┘          └──────────┘
-       │                     │                     │
-       ▼                     ▼                     ▼
-  ┌────────────────────────────────────────────────────┐
-  │ l_values[...]    u_values[...]    u_diag[...]      │  ← 共享缓冲区
-  │ (通过裸指针写入，每列范围互不重叠)                    │     (unsafe 写入)
-  └────────────────────────────────────────────────────┘
+  FactorThreadPool（持久）
+  ┌──────────────────────────────────────────────────────────────┐
+  │ shared: Arc<(Mutex<SharedPoolState>, Condvar, Condvar)>      │
+  │                                                              │
+  │  工作线程 0               工作线程 1              工作线程 2   │
+  │  ┌──────────────┐        ┌──────────────┐       ┌──────────┐ │
+  │  │ work_buf (持久)│        │ work_buf (持久)│       │ work_buf │ │ ← 持久私有工作区
+  │  └──────────────┘        └──────────────┘       └──────────┘ │
+  └──────────────────────────────────────────────────────────────┘
+              │                     │                     │
+    每次 factor() 调用传入 WorkDescriptor（裸指针）：
+              │                     │                     │
+              ▼                     ▼                     ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │ WorkDescriptor 指向的数据（在 factor_block_parallel 栈上）：  │
+  │                                                             │
+  │  只读：sym, ap, ai, ax, row_perm_inv                        │
+  │  写入：l_values[...], u_values[...], u_diag[...]            │
+  │  同步：ready[0..n] (AtomicBool)                             │
+  └─────────────────────────────────────────────────────────────┘
 ```
 
 每个线程：
 - **读取**：`sym`、`ap`、`ai`、`ax`、`row_perm_inv`（只读，无竞争）
-- **读写**：自己的 `work[]` 工作区（私有，无竞争）
+- **读写**：自己的持久 `work_buf[]` 工作区（私有，无竞争，跨调用复用）
 - **写入**：`l_values`、`u_values`、`u_diag` 中属于自己处理的列的范围（互不重叠）
 - **原子操作**：`ready[]` 标志（`Acquire`/`Release` 保证正确性）
 
@@ -310,18 +389,21 @@ while k < n {
 │                     安全 Rust 层                           │
 │  • 所有权系统 → 编译期防止数据竞争                          │
 │  • Send/Sync trait → 控制什么类型能跨线程                   │
-│  • thread::scope → 保证 join，允许安全借用局部变量           │
+│  • Mutex + Condvar → 线程同步和工作分发                     │
+│  • Arc → 线程池共享状态的引用计数                            │
+│  • Drop trait → 线程池销毁时自动 join 所有线程              │
 │  • AtomicBool + Acquire/Release → 无锁的列间同步            │
-│  • 每个线程有自己的 work[] → 无共享可变状态                   │
+│  • 每个线程有自己的持久 work_buf → 无共享可变状态             │
 ├───────────────────────────────────────────────────────────┤
 │                     unsafe 逃逸口                          │
-│  • SendPtr 包装器 → "我保证，不同列写入不重叠"               │
-│  • 裸指针解引用 → "我保证，没有别名冲突"                     │
-│  • 安全论据来自算法层面的不变量（符号分解的列范围）            │
+│  • WorkDescriptor 的裸指针 → "主线程阻塞直到所有工作完成"    │
+│  • unsafe impl Send for WorkDescriptor → "指针跨线程安全"   │
+│  • execute_columns 中裸指针解引用 → "不同列写入不重叠"       │
+│  • 安全论据来自：算法不变量 + condvar 阻塞保证              │
 └───────────────────────────────────────────────────────────┘
 ```
 
-**核心思想**：Rust 不是禁止一切 unsafe —— 它把 unsafe **隔离**起来。`factor_block_parallel()` 中 95% 的代码是安全的 Rust，`unsafe` 集中在少数几行，有明确的文档说明安全理由。编译器保护你不犯低级错误，只在编译器能力不够的地方由程序员接管。
+**核心思想**：Rust 不是禁止一切 unsafe —— 它把 unsafe **隔离**起来。线程池的创建、销毁、同步全部使用安全 Rust（`Mutex`、`Condvar`、`Arc`、`Drop`）。`unsafe` 只集中在 `execute_columns()` 中的裸指针解引用，有明确的文档说明安全理由。编译器保护你不犯低级错误，只在编译器能力不够的地方由程序员接管。
 
 ## 8. 参考
 

@@ -36,7 +36,9 @@ use crate::solver::{LinearSolver, SolverError};
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "parallel")]
-use std::thread;
+use std::sync::{Arc, Condvar, Mutex};
+#[cfg(feature = "parallel")]
+use std::thread::{self, JoinHandle};
 
 // ============================================================================
 // Configuration
@@ -134,6 +136,446 @@ struct OffDiagBlock {
 }
 
 // ============================================================================
+// Persistent thread pool for parallel factorization
+// ============================================================================
+
+/// Raw pointers to per-call data passed to worker threads each factorization call.
+///
+/// # Lifecycle
+///
+/// A `WorkDescriptor` is created on the stack in `factor_block_parallel()` for each
+/// refactorization call. It contains raw pointers to:
+/// - The symbolic factor (`sym`), column pointers/indices/values (`ap`, `ai`, `ax`),
+///   and previous row permutation (`row_perm_inv`) — all borrowed, read-only data
+/// - Output buffers (`l_values`, `u_values`, `u_diag`) and synchronization flags (`ready`)
+///   — stack-allocated in `factor_block_parallel()`, written by workers
+///
+/// The main thread blocks (via condvar) until all workers finish, so all pointed-to
+/// data is guaranteed to outlive worker access. The descriptor is set to `None` in
+/// `SharedPoolState` after workers complete, before the main thread returns.
+///
+/// # Thread Safety
+///
+/// Each worker writes to disjoint column ranges in the output buffers (determined by
+/// `l_col_ptr`/`u_col_ptr`). Cross-column reads use `ready[j]` with Acquire/Release
+/// ordering to establish happens-before relationships.
+#[cfg(feature = "parallel")]
+struct WorkDescriptor {
+    n: usize,
+    num_threads: usize,
+    // Symbolic factor (read-only)
+    sym_n: usize,
+    col_perm_inv: *const usize,
+    col_perm: *const usize,
+    l_col_ptr: *const usize,
+    l_row_idx: *const usize,
+    u_col_ptr: *const usize,
+    u_row_idx: *const usize,
+    // Input matrix (read-only)
+    ap: *const i64,
+    ai: *const i64,
+    ax: *const f64,
+    // Previous row permutation (read-only)
+    row_perm_inv: *const usize,
+    // Output buffers (disjoint writes per column)
+    l_values: *mut f64,
+    u_values: *mut f64,
+    u_diag: *mut f64,
+    // Synchronization flags
+    ready: *const AtomicBool,
+}
+
+#[cfg(feature = "parallel")]
+unsafe impl Send for WorkDescriptor {}
+
+/// Mutex-protected shared state for thread pool coordination.
+///
+/// The `generation` counter is the central synchronization mechanism:
+/// - Main thread increments it and sets `work = Some(descriptor)` to dispatch work
+/// - Workers compare their last-seen generation to detect new work
+/// - `done_count` tracks how many workers have finished the current generation
+/// - When `done_count == num_workers`, the main thread is woken via condvar
+#[cfg(feature = "parallel")]
+struct SharedPoolState {
+    work: Option<WorkDescriptor>,
+    generation: u64,
+    done_count: usize,
+    num_workers: usize,
+    shutdown: bool,
+}
+
+/// Persistent thread pool for parallel column-level LU refactorization.
+///
+/// # Lifecycle
+///
+/// - **Created lazily**: On the first parallel refactorization call when `parallel_threads >= 2`
+///   and the block size is >= 64. Not created at solver construction time.
+/// - **Reused**: Across all subsequent `factor()` calls. During sequential factorizations
+///   (first factor, small blocks, or `parallel_threads < 2`), the worker threads simply
+///   sleep on the condvar with zero CPU cost.
+/// - **Recreated**: If `parallel_threads` changes between calls, the old pool is dropped
+///   and a new one is created with the updated thread count.
+/// - **Destroyed**: When `NativeKluSolver` is dropped, `FactorThreadPool::drop()` sets
+///   `shutdown = true`, wakes all workers, and joins their OS threads.
+///
+/// # Communication Protocol
+///
+/// Uses a Mutex + two Condvars (wake_workers, wake_main) for synchronization:
+///
+/// ```text
+/// Main thread                          Worker threads (persistent)
+///     │                                     │ (sleeping on wake_workers condvar)
+///     ├─ lock mutex                         │
+///     ├─ set work = Some(descriptor)        │
+///     ├─ generation += 1                    │
+///     ├─ done_count = 0                     │
+///     ├─ notify_all(wake_workers) ─────────→├─ wake up, read WorkDescriptor
+///     ├─ wait(wake_main) ←─ (blocked)       ├─ process interleaved columns
+///     │                                     ├─ spin-wait on ready[] for dependencies
+///     │                                     ├─ lock mutex, done_count += 1
+///     │                                     ├─ if last: notify(wake_main) ────→├─ main wakes
+///     │                                     ├─ loop back to sleep              ├─ set work = None
+///     │                                                                        ├─ return NumericFactor
+/// ```
+#[cfg(feature = "parallel")]
+struct FactorThreadPool {
+    shared: Arc<(Mutex<SharedPoolState>, Condvar, Condvar)>,
+    //                                    wake_workers  wake_main
+    threads: Vec<Option<JoinHandle<()>>>,
+    num_threads: usize,
+}
+
+#[cfg(feature = "parallel")]
+impl FactorThreadPool {
+    /// Create a new thread pool with `num_threads` persistent worker threads.
+    fn new(num_threads: usize) -> Self {
+        let shared = Arc::new((
+            Mutex::new(SharedPoolState {
+                work: None,
+                generation: 0,
+                done_count: 0,
+                num_workers: num_threads,
+                shutdown: false,
+            }),
+            Condvar::new(), // wake_workers
+            Condvar::new(), // wake_main
+        ));
+
+        let mut threads = Vec::with_capacity(num_threads);
+        for tid in 0..num_threads {
+            let shared_clone = Arc::clone(&shared);
+            let handle = thread::spawn(move || {
+                Self::worker_loop(tid, shared_clone);
+            });
+            threads.push(Some(handle));
+        }
+
+        FactorThreadPool {
+            shared,
+            threads,
+            num_threads,
+        }
+    }
+
+    /// Worker thread main loop. Sleeps until work is dispatched or shutdown is signaled.
+    fn worker_loop(tid: usize, shared: Arc<(Mutex<SharedPoolState>, Condvar, Condvar)>) {
+        let (ref mutex, ref wake_workers, ref wake_main) = *shared;
+        let mut last_generation: u64 = 0;
+        let mut work_buf: Vec<f64> = Vec::new(); // persistent per-thread workspace
+
+        loop {
+            // Wait for new work or shutdown
+            let desc_copy;
+            {
+                let mut state = mutex.lock().unwrap();
+                loop {
+                    if state.shutdown {
+                        return;
+                    }
+                    if state.generation > last_generation && state.work.is_some() {
+                        last_generation = state.generation;
+                        // Copy out the raw descriptor data we need
+                        let w = state.work.as_ref().unwrap();
+                        desc_copy = WorkDescriptor {
+                            n: w.n,
+                            num_threads: w.num_threads,
+                            sym_n: w.sym_n,
+                            col_perm_inv: w.col_perm_inv,
+                            col_perm: w.col_perm,
+                            l_col_ptr: w.l_col_ptr,
+                            l_row_idx: w.l_row_idx,
+                            u_col_ptr: w.u_col_ptr,
+                            u_row_idx: w.u_row_idx,
+                            ap: w.ap,
+                            ai: w.ai,
+                            ax: w.ax,
+                            row_perm_inv: w.row_perm_inv,
+                            l_values: w.l_values,
+                            u_values: w.u_values,
+                            u_diag: w.u_diag,
+                            ready: w.ready,
+                        };
+                        break;
+                    }
+                    state = wake_workers.wait(state).unwrap();
+                }
+            }
+
+            // Process columns for this dispatch
+            let n = desc_copy.n;
+
+            // Resize persistent workspace
+            work_buf.resize(n, 0.0);
+            // Ensure clean (should already be, but be safe on first use or size change)
+            for v in work_buf.iter_mut() {
+                *v = 0.0;
+            }
+
+            // Execute interleaved columns
+            unsafe {
+                execute_columns(tid, &desc_copy, &mut work_buf);
+            }
+
+            // Signal completion
+            {
+                let mut state = mutex.lock().unwrap();
+                state.done_count += 1;
+                if state.done_count == state.num_workers {
+                    wake_main.notify_one();
+                }
+            }
+        }
+    }
+
+    /// Dispatch work to all worker threads and block until completion.
+    fn execute(&self, desc: WorkDescriptor) {
+        let (ref mutex, ref wake_workers, ref wake_main) = *self.shared;
+
+        // Dispatch
+        {
+            let mut state = mutex.lock().unwrap();
+            state.work = Some(desc);
+            state.generation += 1;
+            state.done_count = 0;
+        }
+        wake_workers.notify_all();
+
+        // Wait for all workers to finish
+        {
+            let mut state = mutex.lock().unwrap();
+            while state.done_count < state.num_workers {
+                state = wake_main.wait(state).unwrap();
+            }
+            state.work = None;
+        }
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl Drop for FactorThreadPool {
+    fn drop(&mut self) {
+        // Signal shutdown
+        {
+            let (ref mutex, ref wake_workers, _) = *self.shared;
+            let mut state = mutex.lock().unwrap();
+            state.shutdown = true;
+            wake_workers.notify_all();
+        }
+        // Join all threads
+        for handle in &mut self.threads {
+            if let Some(h) = handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+}
+
+/// Execute interleaved columns for a single worker thread.
+///
+/// # Safety
+///
+/// Caller must ensure:
+/// - All pointers in `desc` are valid for the duration of this call
+/// - Each column's output ranges in `l_values`/`u_values`/`u_diag` are disjoint across threads
+/// - `ready[j]` is only read after being stored by the thread that processed column `j`
+#[cfg(feature = "parallel")]
+unsafe fn execute_columns(tid: usize, desc: &WorkDescriptor, work: &mut [f64]) {
+    let n = desc.n;
+    let num_threads = desc.num_threads;
+
+    let col_perm_inv = std::slice::from_raw_parts(desc.col_perm_inv, n);
+    let col_perm = std::slice::from_raw_parts(desc.col_perm, n);
+    let l_col_ptr = std::slice::from_raw_parts(desc.l_col_ptr, n + 1);
+    let l_row_idx_full = std::slice::from_raw_parts(desc.l_row_idx, l_col_ptr[n]);
+    let u_col_ptr = std::slice::from_raw_parts(desc.u_col_ptr, n + 1);
+    let u_row_idx_full = std::slice::from_raw_parts(desc.u_row_idx, u_col_ptr[n]);
+    let ap = std::slice::from_raw_parts(desc.ap, n + 1);
+    let ai_len = ap[n] as usize;
+    let ai = std::slice::from_raw_parts(desc.ai, ai_len);
+    let ax = std::slice::from_raw_parts(desc.ax, ai_len);
+    let row_perm_inv = std::slice::from_raw_parts(desc.row_perm_inv, n);
+    let ready = std::slice::from_raw_parts(desc.ready, n);
+
+    let l_raw = desc.l_values;
+    let u_raw = desc.u_values;
+    let d_raw = desc.u_diag;
+
+    let mut k = tid;
+    while k < n {
+        let orig_col = col_perm_inv[k];
+
+        // Step 1: Scatter column k of A into work using row_perm_inv (read-only)
+        let start = ap[orig_col] as usize;
+        let end = ap[orig_col + 1] as usize;
+        for idx in start..end {
+            let orig_row = ai[idx] as usize;
+            if orig_row < n {
+                let perm_row = row_perm_inv[col_perm[orig_row]];
+                work[perm_row] += ax[idx];
+            }
+        }
+
+        // Step 2: Left-looking update — for each j < k where U(j,k) != 0
+        let u_start = u_col_ptr[k];
+        let u_end = u_col_ptr[k + 1] - 1; // exclude diagonal
+
+        for u_idx in u_start..u_end {
+            let j = u_row_idx_full[u_idx];
+
+            // Spin-wait until column j is ready
+            while !ready[j].load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+
+            let u_jk = work[j];
+            if u_jk != 0.0 {
+                let l_start_j = l_col_ptr[j];
+                let l_end_j = l_col_ptr[j + 1];
+                for l_idx in l_start_j..l_end_j {
+                    let row = l_row_idx_full[l_idx];
+                    let l_val = *l_raw.add(l_idx);
+                    work[row] -= l_val * u_jk;
+                }
+            }
+        }
+
+        // Step 3: Extract U entries for this column
+        for u_idx in u_start..u_end {
+            let row = u_row_idx_full[u_idx];
+            *u_raw.add(u_idx) = work[row];
+        }
+
+        // Diagonal
+        let mut diag = work[k];
+        if diag.abs() < 1e-14 {
+            diag = if diag >= 0.0 { 1e-14 } else { -1e-14 };
+        }
+        let diag_idx = u_col_ptr[k + 1] - 1;
+        *u_raw.add(diag_idx) = diag;
+        *d_raw.add(k) = diag;
+
+        // Step 4: Compute L(:,k) = work[below diag] / diag
+        let l_start_k = l_col_ptr[k];
+        let l_end_k = l_col_ptr[k + 1];
+        for l_idx in l_start_k..l_end_k {
+            let row = l_row_idx_full[l_idx];
+            *l_raw.add(l_idx) = work[row] / diag;
+        }
+
+        // Step 5: Clear work (only touched entries)
+        for idx in start..end {
+            let orig_row = ai[idx] as usize;
+            if orig_row < n {
+                let perm_row = row_perm_inv[col_perm[orig_row]];
+                work[perm_row] = 0.0;
+            }
+        }
+        for l_idx in l_start_k..l_end_k {
+            work[l_row_idx_full[l_idx]] = 0.0;
+        }
+        for u_idx in u_start..u_end {
+            work[u_row_idx_full[u_idx]] = 0.0;
+        }
+        work[k] = 0.0;
+
+        // Step 6: Signal this column is done
+        ready[k].store(true, Ordering::Release);
+
+        k += num_threads;
+    }
+}
+
+/// Parallel refactorization using a persistent thread pool with interleaved
+/// column assignment and spin-wait synchronization.
+///
+/// Standalone function (not a method on `NativeKluSolver`) to avoid borrow
+/// conflicts: `do_factor` needs `&self.block_symbolic[k]` and `&self.block_numeric[k]`
+/// simultaneously with the pool from `&self.thread_pool`.
+///
+/// # Safety
+///
+/// Uses raw pointers in `WorkDescriptor` for shared output buffers (`l_values`,
+/// `u_values`, `u_diag`). This is safe because:
+/// - `pool.execute()` blocks until all workers finish
+/// - All pointed-to data lives on this function's stack frame
+/// - Each column writes to a disjoint range determined by `l_col_ptr`/`u_col_ptr`
+/// - Reads from column j only happen after `ready[j]` is set (Acquire ordering)
+/// - Writes are followed by `ready[k].store(true, Release)` (happens-before)
+#[cfg(feature = "parallel")]
+fn factor_block_parallel(
+    pool: &FactorThreadPool,
+    num_threads: usize,
+    sym: &SymbolicFactor,
+    ap: &[i64],
+    ai: &[i64],
+    ax: &[f64],
+    old_numeric: &NumericFactor,
+) -> Result<NumericFactor, SolverError> {
+    let n = sym.n;
+
+    // Pre-allocate shared output buffers (on stack)
+    let mut l_values = vec![0.0f64; sym.l_row_idx.len()];
+    let mut u_values = vec![0.0f64; sym.u_row_idx.len()];
+    let mut u_diag = vec![0.0f64; n];
+
+    // Ready flags for column synchronization
+    let ready: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+
+    // Build WorkDescriptor with raw pointers to stack-local data.
+    // Safety: pool.execute() blocks until all workers finish, so all
+    // pointed-to data outlives worker access.
+    let desc = WorkDescriptor {
+        n,
+        num_threads,
+        sym_n: sym.n,
+        col_perm_inv: sym.col_perm_inv.as_ptr(),
+        col_perm: sym.col_perm.as_ptr(),
+        l_col_ptr: sym.l_col_ptr.as_ptr(),
+        l_row_idx: sym.l_row_idx.as_ptr(),
+        u_col_ptr: sym.u_col_ptr.as_ptr(),
+        u_row_idx: sym.u_row_idx.as_ptr(),
+        ap: ap.as_ptr(),
+        ai: ai.as_ptr(),
+        ax: ax.as_ptr(),
+        row_perm_inv: old_numeric.row_perm_inv.as_ptr(),
+        l_values: l_values.as_mut_ptr(),
+        u_values: u_values.as_mut_ptr(),
+        u_diag: u_diag.as_mut_ptr(),
+        ready: ready.as_ptr(),
+    };
+
+    pool.execute(desc);
+
+    Ok(NumericFactor {
+        l_values,
+        u_values,
+        row_perm: old_numeric.row_perm.clone(),
+        row_perm_inv: old_numeric.row_perm_inv.clone(),
+        u_diag,
+    })
+}
+
+// ============================================================================
 // Statistics
 // ============================================================================
 
@@ -186,6 +628,10 @@ pub struct NativeKluSolver {
 
     // Parallel factorization thread count (0 = off, >0 = thread count)
     parallel_threads: usize,
+
+    // Persistent thread pool for parallel factorization (created lazily on first use)
+    #[cfg(feature = "parallel")]
+    thread_pool: Option<FactorThreadPool>,
 }
 
 unsafe impl Send for NativeKluSolver {}
@@ -206,6 +652,8 @@ impl NativeKluSolver {
             stats: NativeKluStats::default(),
             work: vec![0.0; n],
             parallel_threads: 0,
+            #[cfg(feature = "parallel")]
+            thread_pool: None,
         }
     }
 
@@ -574,6 +1022,15 @@ impl NativeKluSolver {
         #[allow(unused_mut)]
         let mut used_parallel = false;
 
+        // Lazily create/recreate the thread pool before entering the block loop,
+        // so there's no borrow conflict with block_symbolic/block_numeric.
+        #[cfg(feature = "parallel")]
+        let num_threads = self.parallel_threads.min(self.n);
+        #[cfg(feature = "parallel")]
+        if self.parallel_threads >= 2 {
+            self.ensure_thread_pool(num_threads);
+        }
+
         if let Some(ref btf) = self.btf {
             let btf = btf.clone();
             // Factor each diagonal block
@@ -596,7 +1053,11 @@ impl NativeKluSolver {
                     {
                         if self.parallel_threads >= 2 && pattern_same && old_numeric.is_some() && sym.n >= 64 {
                             used_parallel = true;
-                            self.factor_block_parallel(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric.unwrap())?
+                            factor_block_parallel(
+                                self.thread_pool.as_ref().unwrap(),
+                                num_threads.min(sym.n),
+                                sym, &blk_ap, &blk_ai, &blk_ax, old_numeric.unwrap(),
+                            )?
                         } else {
                             self.factor_block(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric, pattern_same)?
                         }
@@ -652,7 +1113,11 @@ impl NativeKluSolver {
                 {
                     if self.parallel_threads >= 2 && pattern_same && old_numeric.is_some() && sym.n >= 64 {
                         used_parallel = true;
-                        self.factor_block_parallel(sym, ap, ai, ax, old_numeric.unwrap())?
+                        factor_block_parallel(
+                            self.thread_pool.as_ref().unwrap(),
+                            num_threads.min(sym.n),
+                            sym, ap, ai, ax, old_numeric.unwrap(),
+                        )?
                     } else {
                         self.factor_block(sym, ap, ai, ax, old_numeric, pattern_same)?
                     }
@@ -920,174 +1385,18 @@ impl NativeKluSolver {
     // Parallel numeric refactorization (column-level parallelism)
     // ========================================================================
 
-    /// Parallel refactorization using interleaved column assignment with
-    /// spin-wait synchronization. Only called during refactorization when
-    /// pivot order is fixed (use_old_pivots=true), block size >= 64, and
-    /// the `parallel` feature is enabled.
-    ///
-    /// Safety: Uses raw pointers for shared output buffers (`l_values`,
-    /// `u_values`, `u_diag`). This is safe because:
-    /// - Each column writes to a disjoint range determined by `l_col_ptr`/`u_col_ptr`
-    /// - Reads from column j only happen after `ready[j]` is set (Acquire ordering)
-    /// - Writes are followed by `ready[k].store(true, Release)` (happens-before)
+    /// Ensure the persistent thread pool exists with the correct thread count.
+    /// Called at the start of `do_factor` before entering the block loop, so
+    /// there is no borrow conflict with `block_symbolic` / `block_numeric`.
     #[cfg(feature = "parallel")]
-    fn factor_block_parallel(
-        &self,
-        sym: &SymbolicFactor,
-        ap: &[i64],
-        ai: &[i64],
-        ax: &[f64],
-        old_numeric: &NumericFactor,
-    ) -> Result<NumericFactor, SolverError> {
-        let n = sym.n;
-
-        // Pre-allocate shared output buffers
-        let mut l_values = vec![0.0f64; sym.l_row_idx.len()];
-        let mut u_values = vec![0.0f64; sym.u_row_idx.len()];
-        let mut u_diag = vec![0.0f64; n];
-
-        // Ready flags for column synchronization
-        let ready: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
-
-        // Row permutation from previous factorization (read-only)
-        let row_perm_inv = &old_numeric.row_perm_inv;
-
-        // Raw pointers for disjoint writes from multiple threads
-        let l_ptr = l_values.as_mut_ptr();
-        let u_ptr = u_values.as_mut_ptr();
-        let d_ptr = u_diag.as_mut_ptr();
-
-        // Wrapper to send raw pointers across thread boundaries.
-        // Safety: each column writes to a disjoint range, and reads
-        // from column j only occur after ready[j] is set (Acquire/Release).
-        struct SendPtr(*mut f64);
-        unsafe impl Send for SendPtr {}
-        unsafe impl Sync for SendPtr {}
-
-        let l_send = SendPtr(l_ptr);
-        let u_send = SendPtr(u_ptr);
-        let d_send = SendPtr(d_ptr);
-
-        // Use real OS threads (not rayon tasks) because spin-waiting
-        // would block rayon's cooperative work-stealing scheduler.
-        // Thread count is controlled by solver_parallel option.
-        let num_threads = self.parallel_threads.min(n);
-
-        thread::scope(|s| {
-            for tid in 0..num_threads {
-                let ready_ref = &ready;
-                let sym_ref = sym;
-                let l_s = &l_send;
-                let u_s = &u_send;
-                let d_s = &d_send;
-
-                s.spawn(move || {
-                    let l_raw = l_s.0;
-                    let u_raw = u_s.0;
-                    let d_raw = d_s.0;
-
-                    // Per-thread workspace
-                    let mut work = vec![0.0f64; n];
-
-                    // Interleaved column assignment: thread tid handles
-                    // columns tid, tid+T, tid+2T, ...
-                    let mut k = tid;
-                    while k < n {
-                        let orig_col = sym_ref.col_perm_inv[k];
-
-                        // Step 1: Scatter column k of A into work using row_perm_inv (read-only)
-                        let start = ap[orig_col] as usize;
-                        let end = ap[orig_col + 1] as usize;
-                        for idx in start..end {
-                            let orig_row = ai[idx] as usize;
-                            if orig_row < n {
-                                let perm_row = row_perm_inv[sym_ref.col_perm[orig_row]];
-                                work[perm_row] += ax[idx];
-                            }
-                        }
-
-                        // Step 2: Left-looking update — for each j < k where U(j,k) != 0
-                        let u_start = sym_ref.u_col_ptr[k];
-                        let u_end = sym_ref.u_col_ptr[k + 1] - 1; // exclude diagonal
-
-                        for u_idx in u_start..u_end {
-                            let j = sym_ref.u_row_idx[u_idx];
-
-                            // Spin-wait until column j is ready
-                            while !ready_ref[j].load(Ordering::Acquire) {
-                                std::hint::spin_loop();
-                            }
-
-                            let u_jk = work[j];
-                            if u_jk != 0.0 {
-                                let l_start_j = sym_ref.l_col_ptr[j];
-                                let l_end_j = sym_ref.l_col_ptr[j + 1];
-                                for l_idx in l_start_j..l_end_j {
-                                    let row = sym_ref.l_row_idx[l_idx];
-                                    // Read L value from shared buffer (column j is ready)
-                                    let l_val = unsafe { *l_raw.add(l_idx) };
-                                    work[row] -= l_val * u_jk;
-                                }
-                            }
-                        }
-
-                        // Step 3: Extract U entries for this column
-                        for u_idx in u_start..u_end {
-                            let row = sym_ref.u_row_idx[u_idx];
-                            unsafe { *u_raw.add(u_idx) = work[row]; }
-                        }
-
-                        // Diagonal
-                        let mut diag = work[k];
-                        if diag.abs() < 1e-14 {
-                            diag = if diag >= 0.0 { 1e-14 } else { -1e-14 };
-                        }
-                        let diag_idx = sym_ref.u_col_ptr[k + 1] - 1;
-                        unsafe {
-                            *u_raw.add(diag_idx) = diag;
-                            *d_raw.add(k) = diag;
-                        }
-
-                        // Step 4: Compute L(:,k) = work[below diag] / diag
-                        let l_start_k = sym_ref.l_col_ptr[k];
-                        let l_end_k = sym_ref.l_col_ptr[k + 1];
-                        for l_idx in l_start_k..l_end_k {
-                            let row = sym_ref.l_row_idx[l_idx];
-                            unsafe { *l_raw.add(l_idx) = work[row] / diag; }
-                        }
-
-                        // Step 5: Clear work (only touched entries)
-                        for idx in start..end {
-                            let orig_row = ai[idx] as usize;
-                            if orig_row < n {
-                                let perm_row = row_perm_inv[sym_ref.col_perm[orig_row]];
-                                work[perm_row] = 0.0;
-                            }
-                        }
-                        for l_idx in l_start_k..l_end_k {
-                            work[sym_ref.l_row_idx[l_idx]] = 0.0;
-                        }
-                        for u_idx in u_start..u_end {
-                            work[sym_ref.u_row_idx[u_idx]] = 0.0;
-                        }
-                        work[k] = 0.0;
-
-                        // Step 6: Signal this column is done
-                        ready_ref[k].store(true, Ordering::Release);
-
-                        k += num_threads;
-                    }
-                });
-            }
-        });
-
-        Ok(NumericFactor {
-            l_values,
-            u_values,
-            row_perm: old_numeric.row_perm.clone(),
-            row_perm_inv: old_numeric.row_perm_inv.clone(),
-            u_diag,
-        })
+    fn ensure_thread_pool(&mut self, num_threads: usize) {
+        let need_new_pool = match &self.thread_pool {
+            Some(pool) => pool.num_threads != num_threads,
+            None => true,
+        };
+        if need_new_pool {
+            self.thread_pool = Some(FactorThreadPool::new(num_threads));
+        }
     }
 
     // ========================================================================
@@ -1362,5 +1671,15 @@ impl LinearSolver for NativeKluSolver {
 
     fn set_parallel_threads(&mut self, threads: usize) {
         self.parallel_threads = threads;
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl Drop for NativeKluSolver {
+    fn drop(&mut self) {
+        // Drop the thread pool, which signals shutdown and joins worker threads.
+        // This is done explicitly for clarity; it would also happen automatically
+        // when the Option<FactorThreadPool> field is dropped.
+        self.thread_pool.take();
     }
 }
