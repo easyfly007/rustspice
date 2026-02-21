@@ -567,6 +567,7 @@ frequency,out_dB,out_deg
 | `temp` | float | 27.0 | (-273.15, 1000) | 仿真温度 (°C) |
 | `tnom` | float | 27.0 | (-273.15, 1000) | 标称温度 (°C) |
 | `solver` | string | auto | 见下表 | 线性求解器选择 |
+| `solver_parallel` | int | 0 | [0, 256] | 并行分解线程数（0或1=关闭，≥2=线程数） |
 
 ### 6.2 求解器选项 (solver)
 
@@ -597,14 +598,33 @@ frequency,out_dB,out_deg
 - 50 < n ≤ 500: 优先 KLU → Faer → SparseLU
 - n > 500: 优先 KLU → Faer → SparseLU-BTF
 
-### 6.3 示例
+### 6.3 并行分解选项 (solver_parallel)
+
+`solver_parallel` 控制 Native KLU 求解器的列级并行分解。默认值为 `0`（关闭）。
+
+- `0` 或 `1`：关闭并行，使用顺序分解（默认）
+- `≥ 2`：启用并行，使用指定数量的线程
+
+并行分解仅在以下条件同时满足时生效：
+1. 编译时启用了 `parallel` feature (`--features parallel`)
+2. 使用 Native KLU 求解器
+3. 矩阵块大小 ≥ 64
+4. 为重分解（refactorization）阶段，即相同稀疏模式的第二次及后续分解
 
 ```spice
-* 使用 Native KLU 求解器，提高迭代上限
+.option solver_parallel=4   * 使用 4 个线程进行并行分解
+.option solver_parallel=8   * 使用 8 个线程
+.option solver_parallel=0   * 关闭并行（默认）
+```
+
+### 6.4 示例
+
+```spice
+* 使用 Native KLU 求解器，启用 4 线程并行，提高迭代上限
 V1 in 0 DC 5
 R1 in out 1k
 R2 out 0 2k
-.option solver=nativeklu itl1=200
+.option solver=nativeklu solver_parallel=4 itl1=200
 .op
 .end
 ```

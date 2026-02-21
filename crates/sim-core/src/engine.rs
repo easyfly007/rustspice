@@ -63,7 +63,10 @@ impl Engine {
     /// based on matrix size and available features. Otherwise uses the specified solver.
     pub fn new_default(circuit: Circuit) -> Self {
         let solver_type = solver_type_from_options(&circuit.options);
-        Self::new(circuit, solver_type)
+        let parallel_threads = circuit.options.get_int("solver_parallel") as usize;
+        let mut engine = Self::new(circuit, solver_type);
+        engine.solver.set_parallel_threads(parallel_threads);
+        engine
     }
 
     /// Initialize VA/OSDI devices from the circuit's `.va_files`.

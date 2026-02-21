@@ -484,6 +484,7 @@ fn test_native_klu_parallel_matches_sequential() {
     // --- Parallel path: factor then refactor (parallel triggers on second call) ---
     let mut par_solver = NativeKluSolver::new(n);
     par_solver.set_btf(false); // single block
+    par_solver.set_parallel_threads(4); // enable parallel with 4 threads
     par_solver.factor(&ap, &ai, &ax1).unwrap(); // first factor (sequential)
     assert_eq!(par_solver.stats().factor_count, 1);
     assert!(!par_solver.stats().parallel_factor);
@@ -518,6 +519,7 @@ fn test_native_klu_parallel_large_block() {
 
     let mut solver = NativeKluSolver::new(n);
     solver.set_btf(false);
+    solver.set_parallel_threads(4); // enable parallel with 4 threads
 
     // First factor (sequential)
     solver.factor(&ap, &ai, &ax1).unwrap();

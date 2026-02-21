@@ -158,6 +158,11 @@ pub trait LinearSolver: Send {
     fn name(&self) -> &'static str {
         "Unknown"
     }
+
+    /// Set the number of threads for parallel factorization.
+    /// 0 = off (sequential), >0 = use that many threads.
+    /// Default implementation is a no-op (solver doesn't support parallel).
+    fn set_parallel_threads(&mut self, _threads: usize) {}
 }
 
 /// Create solver based on explicit type selection

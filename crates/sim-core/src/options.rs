@@ -135,6 +135,12 @@ fn option_defs() -> Vec<OptionDef> {
             "faer", "klu", "nativeklu",
         ]),
     },
+    OptionDef {
+        name: "solver_parallel",
+        description: "Parallel factorization threads (0=off, >0=thread count)",
+        default: OptionValue::Int(0),
+        range: OptionRange::IntRange(0, 256),
+    },
     ]
 }
 

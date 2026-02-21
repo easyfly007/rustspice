@@ -183,6 +183,9 @@ pub struct NativeKluSolver {
 
     // Workspace (reused)
     work: Vec<f64>,
+
+    // Parallel factorization thread count (0 = off, >0 = thread count)
+    parallel_threads: usize,
 }
 
 unsafe impl Send for NativeKluSolver {}
@@ -202,6 +205,7 @@ impl NativeKluSolver {
             state: SolverState::Empty,
             stats: NativeKluStats::default(),
             work: vec![0.0; n],
+            parallel_threads: 0,
         }
     }
 
@@ -590,7 +594,7 @@ impl NativeKluSolver {
                 let num = {
                     #[cfg(feature = "parallel")]
                     {
-                        if pattern_same && old_numeric.is_some() && sym.n >= 64 {
+                        if self.parallel_threads >= 2 && pattern_same && old_numeric.is_some() && sym.n >= 64 {
                             used_parallel = true;
                             self.factor_block_parallel(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric.unwrap())?
                         } else {
@@ -646,7 +650,7 @@ impl NativeKluSolver {
             let num = {
                 #[cfg(feature = "parallel")]
                 {
-                    if pattern_same && old_numeric.is_some() && sym.n >= 64 {
+                    if self.parallel_threads >= 2 && pattern_same && old_numeric.is_some() && sym.n >= 64 {
                         used_parallel = true;
                         self.factor_block_parallel(sym, ap, ai, ax, old_numeric.unwrap())?
                     } else {
@@ -966,10 +970,8 @@ impl NativeKluSolver {
 
         // Use real OS threads (not rayon tasks) because spin-waiting
         // would block rayon's cooperative work-stealing scheduler.
-        let num_threads = thread::available_parallelism()
-            .map(|p| p.get())
-            .unwrap_or(1)
-            .min(n); // no point having more threads than columns
+        // Thread count is controlled by solver_parallel option.
+        let num_threads = self.parallel_threads.min(n);
 
         thread::scope(|s| {
             for tid in 0..num_threads {
@@ -1356,5 +1358,9 @@ impl LinearSolver for NativeKluSolver {
 
     fn name(&self) -> &'static str {
         "NativeKLU"
+    }
+
+    fn set_parallel_threads(&mut self, threads: usize) {
+        self.parallel_threads = threads;
     }
 }
