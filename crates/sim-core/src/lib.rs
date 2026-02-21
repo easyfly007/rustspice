@@ -4,6 +4,7 @@ pub mod mna;
 pub mod solver;
 pub mod sparse_lu;
 pub mod sparse_lu_btf;
+pub mod native_klu;
 pub mod btf;
 pub mod amd;
 pub mod bbd;

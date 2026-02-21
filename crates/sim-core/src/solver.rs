@@ -132,6 +132,8 @@ pub enum SolverType {
     Faer,
     /// KLU sparse solver - SuiteSparse C library, fastest
     Klu,
+    /// Native Rust KLU solver - pure Rust, no C dependencies
+    NativeKlu,
     /// Automatic selection based on available features
     Auto,
 }
@@ -187,6 +189,7 @@ pub fn create_solver(solver_type: SolverType, n: usize) -> Box<dyn LinearSolver>
                 Box::new(crate::sparse_lu::SparseLuSolver::new(n))
             }
         }
+        SolverType::NativeKlu => Box::new(crate::native_klu::NativeKluSolver::new(n)),
         SolverType::Auto => create_solver_auto(n),
     }
 }
