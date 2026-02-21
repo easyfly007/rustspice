@@ -18,6 +18,18 @@
 ///
 /// That's it. The parsing, validation, range checking, duplicate
 /// warnings, and startup printing are all handled automatically.
+///
+/// # Performance Note
+///
+/// Options are stored in a `HashMap<String, OptionEntry>`. With a small
+/// number of options (tens), this is perfectly fine — lookups are O(1)
+/// and the hash overhead on short key strings is negligible. Options are
+/// read once during setup (e.g. building `NewtonConfig`), not inside
+/// any hot simulation loop.
+///
+/// If the option count grows large (hundreds+), consider switching to a
+/// `Vec<OptionEntry>` indexed by each option's position in `OPTION_DEFS`.
+/// This eliminates hashing entirely and gives cache-friendly access.
 
 use std::collections::HashMap;
 
