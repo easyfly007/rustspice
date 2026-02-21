@@ -1,4 +1,5 @@
 pub mod netlist;
+pub mod options;
 pub mod topology;
 pub mod mna;
 pub mod solver;

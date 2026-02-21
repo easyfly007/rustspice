@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::options::SimOptions;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId(pub usize);
 
@@ -185,6 +187,8 @@ pub struct Circuit {
     pub initial_conditions: HashMap<NodeId, f64>,
     /// Verilog-A / OSDI file paths from .hdl and .osdi directives
     pub va_files: Vec<PathBuf>,
+    /// Simulator options from .option directives
+    pub options: SimOptions,
 }
 
 impl Circuit {
@@ -196,6 +200,7 @@ impl Circuit {
             analysis: Vec::new(),
             initial_conditions: HashMap::new(),
             va_files: Vec::new(),
+            options: SimOptions::new(),
         }
     }
 }

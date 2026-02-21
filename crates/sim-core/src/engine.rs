@@ -12,6 +12,7 @@ use crate::stamp::{
     IntegrationMethod, TransientState,
 };
 use crate::newton::{debug_dump_newton_with_tag, run_newton_with_stepping, NewtonConfig};
+use crate::options::SimOptions;
 use crate::waveform::{
     parse_pulse, parse_pwl, BreakpointManager, TransientSource, WaveformSpec,
 };
@@ -167,7 +168,7 @@ impl Engine {
                     node_count
                 },
                 &inst.params,
-                27.0 + 273.15, // Default temperature: 300.15K (27°C)
+                self.circuit.options.get_float("temp") + 273.15,
             )
             .map_err(|e| e.to_string())?;
 
@@ -198,6 +199,7 @@ impl Engine {
     }
 
     pub fn run_with_store(&mut self, plan: &AnalysisPlan, store: &mut ResultStore) -> RunId {
+        self.circuit.options.print_user_options();
         let result = match &plan.cmd {
             crate::circuit::AnalysisCmd::Tran { tstep, tstop, tstart, tmax } => {
                 self.run_tran_result_with_params(*tstep, *tstop, *tstart, *tmax)
@@ -238,7 +240,7 @@ impl Engine {
     ///   - `iterations`: number of Newton iterations consumed.
     ///   - `status`: `Converged`, `MaxIters`, or `Failed`.
     fn run_dc_result(&mut self, analysis: AnalysisType) -> RunResult {
-        let config = NewtonConfig::default();
+        let config = newton_config_from_options(&self.circuit.options);
         let node_count = self.circuit.nodes.id_to_name.len();
         let mut x = vec![0.0; node_count];
         self.solver.prepare(node_count);
@@ -349,11 +351,11 @@ impl Engine {
 
         self.solver.prepare(node_count);
 
-        // Configuration
+        // Configuration - use options if set, otherwise use defaults
         let min_dt = (tstep * 1e-6).max(1e-15);
         let max_dt = tmax.min(tstop / 10.0);
-        let abs_tol = 1e-9;
-        let rel_tol = 1e-6;
+        let abs_tol = self.circuit.options.get_float("vntol");
+        let rel_tol = self.circuit.options.get_float("reltol");
 
         // Store config for reference (used in error messages)
         let _config = TimeStepConfig {
@@ -401,7 +403,8 @@ impl Engine {
         // ====================================================================
         // Run initial DC operating point (t=tstart)
         // ====================================================================
-        let dc_result = run_newton_with_stepping(&NewtonConfig::default(), &mut x, |x, gmin, source_scale| {
+        let tran_newton_config = newton_config_from_options(&self.circuit.options);
+        let dc_result = run_newton_with_stepping(&tran_newton_config, &mut x, |x, gmin, source_scale| {
             let mut mna = MnaBuilder::new(node_count);
             for inst in &self.circuit.instances.instances {
                 let stamp = InstanceStamp { instance: inst.clone() };
@@ -472,7 +475,7 @@ impl Engine {
             state_be.method = IntegrationMethod::BackwardEuler;
             #[cfg(feature = "va")]
             let alpha_be = 1.0 / dt;
-            let result_be = run_newton_with_stepping(&NewtonConfig::default(), &mut x_be, |x_iter, gmin, source_scale| {
+            let result_be = run_newton_with_stepping(&tran_newton_config, &mut x_be, |x_iter, gmin, source_scale| {
                 let mut mna = MnaBuilder::new(node_count);
                 for inst in &self.circuit.instances.instances {
                     let stamp = InstanceStamp { instance: inst.clone() };
@@ -507,7 +510,7 @@ impl Engine {
             state_trap.method = IntegrationMethod::Trapezoidal;
             #[cfg(feature = "va")]
             let alpha_trap = 2.0 / dt;
-            let result_trap = run_newton_with_stepping(&NewtonConfig::default(), &mut x_trap, |x_iter, gmin, source_scale| {
+            let result_trap = run_newton_with_stepping(&tran_newton_config, &mut x_trap, |x_iter, gmin, source_scale| {
                 let mut mna = MnaBuilder::new(node_count);
                 for inst in &self.circuit.instances.instances {
                     let stamp = InstanceStamp { instance: inst.clone() };
@@ -672,7 +675,7 @@ impl Engine {
     /// Run DC sweep analysis
     /// Sweeps the specified source from start to stop with given step size
     fn run_dc_sweep_result(&mut self, source: &str, start: f64, stop: f64, step: f64) -> RunResult {
-        let config = NewtonConfig::default();
+        let config = newton_config_from_options(&self.circuit.options);
         let node_count = self.circuit.nodes.id_to_name.len();
         let gnd = self.circuit.nodes.gnd_id.0;
 
@@ -955,6 +958,21 @@ impl Engine {
             ac_frequencies,
             ac_solutions,
         }
+    }
+}
+
+/// Build a `NewtonConfig` from the circuit's `SimOptions`.
+fn newton_config_from_options(options: &SimOptions) -> NewtonConfig {
+    let defaults = NewtonConfig::default();
+    NewtonConfig {
+        max_iters: options.get_int("itl1") as usize,
+        abs_tol: options.get_float("vntol"),
+        rel_tol: options.get_float("reltol"),
+        gmin: options.get_float("gmin"),
+        damping: defaults.damping,
+        damping_min: defaults.damping_min,
+        gmin_steps: defaults.gmin_steps,
+        source_steps: defaults.source_steps,
     }
 }
 

@@ -86,6 +86,8 @@ pub enum ControlKind {
     Hdl,
     /// .osdi "path/to/model.osdi" - Pre-compiled OSDI library
     Osdi,
+    /// .option / .options - Simulator options
+    Option,
     Other,
 }
 
@@ -573,6 +575,7 @@ fn map_control_kind(command: &str) -> ControlKind {
         ".end" => ControlKind::End,
         ".hdl" => ControlKind::Hdl,
         ".osdi" => ControlKind::Osdi,
+        ".option" | ".options" => ControlKind::Option,
         _ => ControlKind::Other,
     }
 }
@@ -1036,6 +1039,16 @@ pub fn build_circuit(ast: &NetlistAst, elab: &ElaboratedNetlist) -> crate::circu
                                 circuit.initial_conditions.insert(node_id, value);
                             }
                         }
+                    }
+                }
+                ControlKind::Option => {
+                    // Handle key=value params
+                    for param in &ctrl.params {
+                        circuit.options.set(&param.key, &param.value);
+                    }
+                    // Handle bare positional args as boolean flags (e.g., .option nomod)
+                    for arg in &ctrl.args {
+                        circuit.options.set(arg, "true");
                     }
                 }
                 ControlKind::Hdl | ControlKind::Osdi => {
@@ -1619,7 +1632,7 @@ fn tokenize_expr(expr: &str) -> Vec<ExprToken> {
     tokens
 }
 
-fn parse_number_with_suffix(token: &str) -> Option<f64> {
+pub fn parse_number_with_suffix(token: &str) -> Option<f64> {
     let lower = token.to_ascii_lowercase();
     let trimmed = lower.trim();
     let (num_str, multiplier) = if trimmed.ends_with("meg") {
