@@ -24,5 +24,8 @@ faer-solver = ["dep:faer"]
 # Verilog-A device model support via OSDI
 va = ["dep:sim-va"]
 
+# Column-level parallel factorization (active during refactorization, no extra deps)
+parallel = []
+
 # Default: use faer for easy setup (no C dependencies)
 default = ["faer-solver"]

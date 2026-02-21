@@ -19,6 +19,8 @@
 //! - Gilbert-Peierls DFS-based symbolic + numeric factorization
 //! - Threshold partial pivoting (configurable tolerance)
 //! - Refactorization: reuses symbolic pattern when matrix values change
+//! - Column-level parallel factorization (feature: `parallel`,
+//!   active during refactorization when block size >= 64)
 //! - Condition number estimation via `rcond()`
 //!
 //! # References
@@ -30,6 +32,11 @@
 use crate::amd::amd_order;
 use crate::btf::{btf_decompose, BtfDecomposition};
 use crate::solver::{LinearSolver, SolverError};
+
+#[cfg(feature = "parallel")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "parallel")]
+use std::thread;
 
 // ============================================================================
 // Configuration
@@ -140,6 +147,8 @@ pub struct NativeKluStats {
     pub nblocks: usize,
     pub noffdiag: usize,
     pub rcond: f64,
+    /// Whether the last factorization used the parallel path.
+    pub parallel_factor: bool,
 }
 
 // ============================================================================
@@ -558,6 +567,8 @@ impl NativeKluSolver {
 
     fn do_factor(&mut self, ap: &[i64], ai: &[i64], ax: &[f64]) -> Result<(), SolverError> {
         let pattern_same = self.state == SolverState::Factored && self.pattern_matches(ap, ai);
+        #[allow(unused_mut)]
+        let mut used_parallel = false;
 
         if let Some(ref btf) = self.btf {
             let btf = btf.clone();
@@ -576,7 +587,21 @@ impl NativeKluSolver {
                     None
                 };
 
-                let num = self.factor_block(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric, pattern_same)?;
+                let num = {
+                    #[cfg(feature = "parallel")]
+                    {
+                        if pattern_same && old_numeric.is_some() && sym.n >= 64 {
+                            used_parallel = true;
+                            self.factor_block_parallel(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric.unwrap())?
+                        } else {
+                            self.factor_block(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric, pattern_same)?
+                        }
+                    }
+                    #[cfg(not(feature = "parallel"))]
+                    {
+                        self.factor_block(sym, &blk_ap, &blk_ai, &blk_ax, old_numeric, pattern_same)?
+                    }
+                };
                 new_numerics.push(num);
             }
 
@@ -617,13 +642,29 @@ impl NativeKluSolver {
             } else {
                 None
             };
-            let num = self.factor_block(sym, ap, ai, ax, old_numeric, pattern_same)?;
+
+            let num = {
+                #[cfg(feature = "parallel")]
+                {
+                    if pattern_same && old_numeric.is_some() && sym.n >= 64 {
+                        used_parallel = true;
+                        self.factor_block_parallel(sym, ap, ai, ax, old_numeric.unwrap())?
+                    } else {
+                        self.factor_block(sym, ap, ai, ax, old_numeric, pattern_same)?
+                    }
+                }
+                #[cfg(not(feature = "parallel"))]
+                {
+                    self.factor_block(sym, ap, ai, ax, old_numeric, pattern_same)?
+                }
+            };
 
             self.block_numeric.clear();
             self.block_numeric.push(num);
         }
 
         // Update stats
+        self.stats.parallel_factor = used_parallel;
         if pattern_same && self.state == SolverState::Factored {
             self.stats.refactor_count += 1;
         } else {
@@ -867,6 +908,182 @@ impl NativeKluSolver {
             u_values,
             row_perm,
             row_perm_inv,
+            u_diag,
+        })
+    }
+
+    // ========================================================================
+    // Parallel numeric refactorization (column-level parallelism)
+    // ========================================================================
+
+    /// Parallel refactorization using interleaved column assignment with
+    /// spin-wait synchronization. Only called during refactorization when
+    /// pivot order is fixed (use_old_pivots=true), block size >= 64, and
+    /// the `parallel` feature is enabled.
+    ///
+    /// Safety: Uses raw pointers for shared output buffers (`l_values`,
+    /// `u_values`, `u_diag`). This is safe because:
+    /// - Each column writes to a disjoint range determined by `l_col_ptr`/`u_col_ptr`
+    /// - Reads from column j only happen after `ready[j]` is set (Acquire ordering)
+    /// - Writes are followed by `ready[k].store(true, Release)` (happens-before)
+    #[cfg(feature = "parallel")]
+    fn factor_block_parallel(
+        &self,
+        sym: &SymbolicFactor,
+        ap: &[i64],
+        ai: &[i64],
+        ax: &[f64],
+        old_numeric: &NumericFactor,
+    ) -> Result<NumericFactor, SolverError> {
+        let n = sym.n;
+
+        // Pre-allocate shared output buffers
+        let mut l_values = vec![0.0f64; sym.l_row_idx.len()];
+        let mut u_values = vec![0.0f64; sym.u_row_idx.len()];
+        let mut u_diag = vec![0.0f64; n];
+
+        // Ready flags for column synchronization
+        let ready: Vec<AtomicBool> = (0..n).map(|_| AtomicBool::new(false)).collect();
+
+        // Row permutation from previous factorization (read-only)
+        let row_perm_inv = &old_numeric.row_perm_inv;
+
+        // Raw pointers for disjoint writes from multiple threads
+        let l_ptr = l_values.as_mut_ptr();
+        let u_ptr = u_values.as_mut_ptr();
+        let d_ptr = u_diag.as_mut_ptr();
+
+        // Wrapper to send raw pointers across thread boundaries.
+        // Safety: each column writes to a disjoint range, and reads
+        // from column j only occur after ready[j] is set (Acquire/Release).
+        struct SendPtr(*mut f64);
+        unsafe impl Send for SendPtr {}
+        unsafe impl Sync for SendPtr {}
+
+        let l_send = SendPtr(l_ptr);
+        let u_send = SendPtr(u_ptr);
+        let d_send = SendPtr(d_ptr);
+
+        // Use real OS threads (not rayon tasks) because spin-waiting
+        // would block rayon's cooperative work-stealing scheduler.
+        let num_threads = thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(1)
+            .min(n); // no point having more threads than columns
+
+        thread::scope(|s| {
+            for tid in 0..num_threads {
+                let ready_ref = &ready;
+                let sym_ref = sym;
+                let l_s = &l_send;
+                let u_s = &u_send;
+                let d_s = &d_send;
+
+                s.spawn(move || {
+                    let l_raw = l_s.0;
+                    let u_raw = u_s.0;
+                    let d_raw = d_s.0;
+
+                    // Per-thread workspace
+                    let mut work = vec![0.0f64; n];
+
+                    // Interleaved column assignment: thread tid handles
+                    // columns tid, tid+T, tid+2T, ...
+                    let mut k = tid;
+                    while k < n {
+                        let orig_col = sym_ref.col_perm_inv[k];
+
+                        // Step 1: Scatter column k of A into work using row_perm_inv (read-only)
+                        let start = ap[orig_col] as usize;
+                        let end = ap[orig_col + 1] as usize;
+                        for idx in start..end {
+                            let orig_row = ai[idx] as usize;
+                            if orig_row < n {
+                                let perm_row = row_perm_inv[sym_ref.col_perm[orig_row]];
+                                work[perm_row] += ax[idx];
+                            }
+                        }
+
+                        // Step 2: Left-looking update — for each j < k where U(j,k) != 0
+                        let u_start = sym_ref.u_col_ptr[k];
+                        let u_end = sym_ref.u_col_ptr[k + 1] - 1; // exclude diagonal
+
+                        for u_idx in u_start..u_end {
+                            let j = sym_ref.u_row_idx[u_idx];
+
+                            // Spin-wait until column j is ready
+                            while !ready_ref[j].load(Ordering::Acquire) {
+                                std::hint::spin_loop();
+                            }
+
+                            let u_jk = work[j];
+                            if u_jk != 0.0 {
+                                let l_start_j = sym_ref.l_col_ptr[j];
+                                let l_end_j = sym_ref.l_col_ptr[j + 1];
+                                for l_idx in l_start_j..l_end_j {
+                                    let row = sym_ref.l_row_idx[l_idx];
+                                    // Read L value from shared buffer (column j is ready)
+                                    let l_val = unsafe { *l_raw.add(l_idx) };
+                                    work[row] -= l_val * u_jk;
+                                }
+                            }
+                        }
+
+                        // Step 3: Extract U entries for this column
+                        for u_idx in u_start..u_end {
+                            let row = sym_ref.u_row_idx[u_idx];
+                            unsafe { *u_raw.add(u_idx) = work[row]; }
+                        }
+
+                        // Diagonal
+                        let mut diag = work[k];
+                        if diag.abs() < 1e-14 {
+                            diag = if diag >= 0.0 { 1e-14 } else { -1e-14 };
+                        }
+                        let diag_idx = sym_ref.u_col_ptr[k + 1] - 1;
+                        unsafe {
+                            *u_raw.add(diag_idx) = diag;
+                            *d_raw.add(k) = diag;
+                        }
+
+                        // Step 4: Compute L(:,k) = work[below diag] / diag
+                        let l_start_k = sym_ref.l_col_ptr[k];
+                        let l_end_k = sym_ref.l_col_ptr[k + 1];
+                        for l_idx in l_start_k..l_end_k {
+                            let row = sym_ref.l_row_idx[l_idx];
+                            unsafe { *l_raw.add(l_idx) = work[row] / diag; }
+                        }
+
+                        // Step 5: Clear work (only touched entries)
+                        for idx in start..end {
+                            let orig_row = ai[idx] as usize;
+                            if orig_row < n {
+                                let perm_row = row_perm_inv[sym_ref.col_perm[orig_row]];
+                                work[perm_row] = 0.0;
+                            }
+                        }
+                        for l_idx in l_start_k..l_end_k {
+                            work[sym_ref.l_row_idx[l_idx]] = 0.0;
+                        }
+                        for u_idx in u_start..u_end {
+                            work[sym_ref.u_row_idx[u_idx]] = 0.0;
+                        }
+                        work[k] = 0.0;
+
+                        // Step 6: Signal this column is done
+                        ready_ref[k].store(true, Ordering::Release);
+
+                        k += num_threads;
+                    }
+                });
+            }
+        });
+
+        Ok(NumericFactor {
+            l_values,
+            u_values,
+            row_perm: old_numeric.row_perm.clone(),
+            row_perm_inv: old_numeric.row_perm_inv.clone(),
             u_diag,
         })
     }

@@ -63,7 +63,7 @@ pub enum OptionRange {
     /// Exclusive range for floats: (min, max).
     FloatRange(f64, f64),
     /// Enumerated set of allowed string values.
-    StringEnum(Vec<&'static str>),
+    StringEnum(&'static [&'static str]),
 }
 
 /// Static definition of one simulator option.
@@ -76,7 +76,8 @@ pub struct OptionDef {
 }
 
 /// All known simulator options. To add a new option, add one entry here.
-const OPTION_DEFS: &[OptionDef] = &[
+fn option_defs() -> Vec<OptionDef> {
+    vec![
     OptionDef {
         name: "abstol",
         description: "Absolute current tolerance",
@@ -125,7 +126,17 @@ const OPTION_DEFS: &[OptionDef] = &[
         default: OptionValue::Float(27.0),
         range: OptionRange::FloatRange(-273.15, 1000.0),
     },
-];
+    OptionDef {
+        name: "solver",
+        description: "Linear solver selection",
+        default: OptionValue::Str("auto".to_string()),
+        range: OptionRange::StringEnum(&[
+            "auto", "dense", "sparse", "sparselu", "sparselubtf", "bbd",
+            "faer", "klu", "nativeklu",
+        ]),
+    },
+    ]
+}
 
 /// A stored option entry with its current value and whether the user set it.
 #[derive(Debug, Clone)]
@@ -147,7 +158,7 @@ impl SimOptions {
     /// Create a new `SimOptions` populated with defaults from `OPTION_DEFS`.
     pub fn new() -> Self {
         let mut entries = HashMap::new();
-        for def in OPTION_DEFS {
+        for def in &option_defs() {
             entries.insert(
                 def.name.to_string(),
                 OptionEntry {
@@ -169,7 +180,8 @@ impl SimOptions {
         let key_lower = key.to_ascii_lowercase();
 
         // Find the definition for this option
-        let def = match OPTION_DEFS.iter().find(|d| d.name == key_lower) {
+        let defs = option_defs();
+        let def = match defs.iter().find(|d| d.name == key_lower) {
             Some(d) => d,
             None => {
                 eprintln!("warning: unknown option '{}' ignored", key);
@@ -453,5 +465,29 @@ mod tests {
         // Should keep default
         assert!((opts.get_float("abstol") - 1e-12).abs() < 1e-20);
         assert!(!opts.is_set("abstol"));
+    }
+
+    #[test]
+    fn test_solver_option_default() {
+        let opts = SimOptions::new();
+        assert_eq!(opts.get_string("solver"), "auto");
+        assert!(!opts.is_set("solver"));
+    }
+
+    #[test]
+    fn test_solver_option_set() {
+        let mut opts = SimOptions::new();
+        opts.set("solver", "nativeklu");
+        assert_eq!(opts.get_string("solver"), "nativeklu");
+        assert!(opts.is_set("solver"));
+    }
+
+    #[test]
+    fn test_solver_option_invalid() {
+        let mut opts = SimOptions::new();
+        opts.set("solver", "nonexistent");
+        // Out of range, should keep default
+        assert_eq!(opts.get_string("solver"), "auto");
+        assert!(!opts.is_set("solver"));
     }
 }

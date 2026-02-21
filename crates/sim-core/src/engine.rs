@@ -57,9 +57,13 @@ impl Engine {
         }
     }
 
-    /// Create an Engine with the default solver (Dense).
+    /// Create an Engine with the solver determined by the circuit's `.option solver=` setting.
+    ///
+    /// If no solver option is set (or set to "auto"), uses automatic selection
+    /// based on matrix size and available features. Otherwise uses the specified solver.
     pub fn new_default(circuit: Circuit) -> Self {
-        Self::new(circuit, SolverType::default())
+        let solver_type = solver_type_from_options(&circuit.options);
+        Self::new(circuit, solver_type)
     }
 
     /// Initialize VA/OSDI devices from the circuit's `.va_files`.
@@ -958,6 +962,21 @@ impl Engine {
             ac_frequencies,
             ac_solutions,
         }
+    }
+}
+
+/// Map the `.option solver=` string to a `SolverType`.
+fn solver_type_from_options(options: &SimOptions) -> SolverType {
+    let s = options.get_string("solver");
+    match s.to_ascii_lowercase().as_str() {
+        "dense" => SolverType::Dense,
+        "sparse" | "sparselu" => SolverType::SparseLu,
+        "sparselubtf" => SolverType::SparseLuBtf,
+        "bbd" => SolverType::Bbd,
+        "faer" => SolverType::Faer,
+        "klu" => SolverType::Klu,
+        "nativeklu" => SolverType::NativeKlu,
+        _ => SolverType::Auto, // "auto" or unrecognized → auto-select
     }
 }
 

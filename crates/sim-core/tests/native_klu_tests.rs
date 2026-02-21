@@ -427,3 +427,109 @@ fn test_native_klu_pattern_change() {
     // factor_count should be 2 (both were full factors, pattern changed)
     assert_eq!(solver.stats().factor_count, 2);
 }
+
+// ============================================================================
+// Parallel factorization tests (require --features parallel)
+// ============================================================================
+
+/// Helper: build an n-node RC ladder matrix (tridiagonal).
+/// Returns (ap, ai, ax) in CSC format.
+#[cfg(feature = "parallel")]
+fn build_rc_ladder(n: usize, scale: f64) -> (Vec<i64>, Vec<i64>, Vec<f64>) {
+    let mut ap = vec![0i64];
+    let mut ai = Vec::new();
+    let mut ax = Vec::new();
+
+    for col in 0..n {
+        if col > 0 {
+            ai.push((col - 1) as i64);
+            ax.push(-1.0 * scale);
+        }
+        ai.push(col as i64);
+        ax.push(if col == 0 || col == n - 1 { 2.0 * scale } else { 3.0 * scale });
+        if col < n - 1 {
+            ai.push((col + 1) as i64);
+            ax.push(-1.0 * scale);
+        }
+        ap.push(ai.len() as i64);
+    }
+
+    (ap, ai, ax)
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn test_native_klu_parallel_matches_sequential() {
+    // Build a 100-node RC ladder (single block, n >= 64 triggers parallel)
+    let n = 100;
+    let (ap, ai, ax1) = build_rc_ladder(n, 1.0);
+    let (_, _, ax2) = build_rc_ladder(n, 1.5); // different values, same pattern
+
+    let b: Vec<f64> = (0..n).map(|i| (i + 1) as f64).collect();
+
+    // --- Sequential path: factor + refactor with parallel feature disabled by using small block ---
+    // We can't disable the feature at runtime, so instead we do a full sequential reference
+    // by using a fresh solver for the second factorization (no old_numeric → sequential).
+    let mut seq_solver = NativeKluSolver::new(n);
+    seq_solver.set_btf(false); // single block
+    seq_solver.factor(&ap, &ai, &ax1).unwrap(); // first factor (sequential, establishes pivots)
+    // Now refactor sequentially by creating a fresh solver with same pattern
+    let mut seq_solver2 = NativeKluSolver::new(n);
+    seq_solver2.set_btf(false);
+    seq_solver2.factor(&ap, &ai, &ax2).unwrap(); // fresh factor (sequential)
+    let mut rhs_seq = b.clone();
+    seq_solver2.solve(&mut rhs_seq).unwrap();
+    check_residual(&ap, &ai, &ax2, &rhs_seq, &b, 1e-8);
+
+    // --- Parallel path: factor then refactor (parallel triggers on second call) ---
+    let mut par_solver = NativeKluSolver::new(n);
+    par_solver.set_btf(false); // single block
+    par_solver.factor(&ap, &ai, &ax1).unwrap(); // first factor (sequential)
+    assert_eq!(par_solver.stats().factor_count, 1);
+    assert!(!par_solver.stats().parallel_factor);
+
+    par_solver.factor(&ap, &ai, &ax2).unwrap(); // refactor (parallel, n=100 >= 64)
+    assert_eq!(par_solver.stats().refactor_count, 1);
+    assert!(par_solver.stats().parallel_factor);
+
+    let mut rhs_par = b.clone();
+    par_solver.solve(&mut rhs_par).unwrap();
+    check_residual(&ap, &ai, &ax2, &rhs_par, &b, 1e-8);
+
+    // Compare parallel vs sequential solutions
+    for i in 0..n {
+        assert!(
+            (rhs_par[i] - rhs_seq[i]).abs() < 1e-10,
+            "Parallel/sequential mismatch at {}: par={}, seq={}",
+            i, rhs_par[i], rhs_seq[i]
+        );
+    }
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn test_native_klu_parallel_large_block() {
+    // 200-node RC ladder, refactored with parallel path
+    let n = 200;
+    let (ap, ai, ax1) = build_rc_ladder(n, 1.0);
+    let (_, _, ax2) = build_rc_ladder(n, 2.0);
+
+    let b: Vec<f64> = (0..n).map(|i| ((i % 7) as f64 + 1.0) * 0.5).collect();
+
+    let mut solver = NativeKluSolver::new(n);
+    solver.set_btf(false);
+
+    // First factor (sequential)
+    solver.factor(&ap, &ai, &ax1).unwrap();
+    let mut rhs1 = b.clone();
+    solver.solve(&mut rhs1).unwrap();
+    check_residual(&ap, &ai, &ax1, &rhs1, &b, 1e-8);
+
+    // Refactor with doubled values (parallel path)
+    solver.factor(&ap, &ai, &ax2).unwrap();
+    assert!(solver.stats().parallel_factor);
+
+    let mut rhs2 = b.clone();
+    solver.solve(&mut rhs2).unwrap();
+    check_residual(&ap, &ai, &ax2, &rhs2, &b, 1e-8);
+}

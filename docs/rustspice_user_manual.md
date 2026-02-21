@@ -540,17 +540,88 @@ frequency,out_dB,out_deg
 
 ---
 
-## 6. 常见问题
+## 6. 仿真选项 (.option)
 
-### 6.1 提示缺少 .end
+使用 `.option` 指令可以控制仿真器的各项参数。在网表中添加一行或多行 `.option` 即可:
+
+```spice
+.option <key>=<value>
+```
+
+也可以在一行中设置多个选项:
+
+```spice
+.option abstol=1e-15 reltol=1e-4
+```
+
+### 6.1 选项列表
+
+| 选项 | 类型 | 默认值 | 范围 | 说明 |
+|------|------|--------|------|------|
+| `abstol` | float | 1e-12 | (0, 1e-3) | 绝对电流容差 |
+| `reltol` | float | 1e-3 | (0, 1.0) | 相对容差 |
+| `vntol` | float | 1e-6 | (0, 1.0) | 电压节点容差 |
+| `gmin` | float | 1e-12 | (0, 1e-3) | 最小电导 |
+| `itl1` | int | 100 | [1, 10000] | DC 迭代上限 |
+| `itl4` | int | 50 | [1, 10000] | TRAN 迭代上限 |
+| `temp` | float | 27.0 | (-273.15, 1000) | 仿真温度 (°C) |
+| `tnom` | float | 27.0 | (-273.15, 1000) | 标称温度 (°C) |
+| `solver` | string | auto | 见下表 | 线性求解器选择 |
+
+### 6.2 求解器选项 (solver)
+
+`solver` 选项控制仿真引擎使用的线性求解器。默认值为 `auto`，自动根据矩阵大小选择最合适的求解器。
+
+```spice
+.option solver=auto        * 自动选择（默认）
+.option solver=nativeklu   * 使用 Native KLU 求解器
+.option solver=dense       * 使用稠密 LU 求解器
+```
+
+可用的求解器:
+
+| 值 | 求解器 | 说明 |
+|----|--------|------|
+| `auto` | 自动选择 | 根据矩阵大小自动选择最佳求解器（默认） |
+| `dense` | Dense LU | O(n³)，适合小规模矩阵 (n < 100) |
+| `sparse` / `sparselu` | Sparse LU | O(nnz·fill)，纯 Rust 实现 |
+| `sparselubtf` | Sparse LU + BTF | 带 BTF 分解，适合块结构矩阵 |
+| `bbd` | BBD | 边界块对角分解 + Schur 补 |
+| `faer` | Faer | 纯 Rust 稀疏求解器（需 `faer-solver` feature） |
+| `klu` | KLU (C) | SuiteSparse KLU（需 `klu` feature 及 C 库） |
+| `nativeklu` | Native KLU | 纯 Rust KLU 实现，支持 BTF/AMD/并行重分解 |
+
+**自动选择规则** (`auto`):
+
+- n ≤ 50: Dense（开销低）
+- 50 < n ≤ 500: 优先 KLU → Faer → SparseLU
+- n > 500: 优先 KLU → Faer → SparseLU-BTF
+
+### 6.3 示例
+
+```spice
+* 使用 Native KLU 求解器，提高迭代上限
+V1 in 0 DC 5
+R1 in out 1k
+R2 out 0 2k
+.option solver=nativeklu itl1=200
+.op
+.end
+```
+
+---
+
+## 7. 常见问题
+
+### 7.1 提示缺少 .end
 
 确保网表末尾有 `.end` 行。
 
-### 6.2 无输出结果
+### 7.2 无输出结果
 
 当前版本已支持基础求解输出。若无输出，通常是求解失败或网表语法不完整，请先检查错误提示。
 
-### 6.3 DC Sweep 收敛失败
+### 7.3 DC Sweep 收敛失败
 
 如果在某个扫描点收敛失败:
 - 检查电路是否有效 (是否有浮空节点)
@@ -559,7 +630,7 @@ frequency,out_dB,out_deg
 
 ---
 
-## 7. 版本说明
+## 8. 版本说明
 
 手册会与项目阶段同步更新。后续将补充:
 
@@ -587,14 +658,14 @@ frequency,out_dB,out_deg
 - TRAN 收敛失败时回退 gmin/source stepping
 - TRAN 加权误差估计
 
-## 8. KLU 求解器依赖说明
+## 9. KLU 求解器依赖说明
 
 RustSpice 的线性求解器规划为 SuiteSparse 的 KLU。当前阶段仅完成规划与接口设计，正式启用时需要:
 
 - 安装 SuiteSparse（包含 KLU）
 - 在 Windows 环境准备预编译库或本地编译产物
 
-### 8.1 安装流程（草案）
+### 9.1 安装流程（草案）
 
 #### Windows（推荐）
 
@@ -619,7 +690,7 @@ RustSpice 的线性求解器规划为 SuiteSparse 的 KLU。当前阶段仅完�
    - `brew install suite-sparse`
 2) 确认库路径可被 Rust 构建系统访问
 
-### 8.2 构建系统配置（草案）
+### 9.2 构建系统配置（草案）
 
 建议采用 `build.rs` + 环境变量的方式自动发现 KLU。
 
@@ -637,7 +708,7 @@ RustSpice 的线性求解器规划为 SuiteSparse 的 KLU。当前阶段仅完�
 
 ---
 
-## 9. BSIM 模型文档
+## 10. BSIM 模型文档
 
 完整说明请参考：`docs/bsim_model.md`。
 
